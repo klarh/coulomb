@@ -76,7 +76,7 @@ def main(root, text, files, signatures, changelogs):
         time_subdir = current_time.strftime('%Y/%m%d/%H%M')
         target_dir = os.path.join(root, 'content', time_subdir)
 
-        post_fname = os.path.join(target_dir, '{}.cbor'.format(post_id))
+        post_fname = os.path.join(target_dir, 'post.{}.cbor'.format(post_id))
         if os.path.exists(post_fname):
             continue
 
