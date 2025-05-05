@@ -227,7 +227,7 @@ def write_page_html(templates, root, target_filename, description, change_log):
         template_args = dict(
             entries=entries[-1:],
             posts=[entries[-1]['content']],
-            root_path=os.path.relpath(root, dirname),
+            root_path=os.path.relpath(root, post_dir),
             parent_path=os.path.relpath(target_filename, os.path.dirname(post_file)),
         )
         os.makedirs(post_dir, exist_ok=True)
