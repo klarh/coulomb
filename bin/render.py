@@ -5,6 +5,7 @@
 
 import argparse
 import collections
+import contextlib
 import datetime
 import hashlib
 import os
@@ -21,6 +22,7 @@ parser.add_argument(
 )
 parser.add_argument('-x', '--hash-name', default='sha512', help='Hash function to use')
 parser.add_argument('-t', '--template-dir', help='Template directory')
+parser.add_argument('--change-log', help='Changelog file to write to')
 
 LATEST_PAGE_NAME = 'pages/latest.html'
 
@@ -203,7 +205,7 @@ class BuildCache:
         self.connection.execute('COMMIT')
 
 
-def write_page_html(templates, root, target_filename, description):
+def write_page_html(templates, root, target_filename, description, change_log):
     print('writing', description, 'to', target_filename)
     target_filename = os.path.join(root, target_filename)
     dirname = os.path.dirname(target_filename)
@@ -232,6 +234,8 @@ def write_page_html(templates, root, target_filename, description):
         with open(post_file, 'w') as f:
             f.write(templates['post'].render(**template_args))
         entries[-1]['direct_link'] = os.path.relpath(post_file, dirname)
+        if change_log is not None:
+            change_log.write('{}\n'.format(post_file))
 
     os.makedirs(dirname, exist_ok=True)
     for name in ('next_page', 'previous_page'):
@@ -249,9 +253,11 @@ def write_page_html(templates, root, target_filename, description):
 
     with open(target_filename, 'w') as f:
         f.write(templates['post'].render(**template_args))
+    if change_log is not None:
+        change_log.write('{}\n'.format(target_filename))
 
 
-def main(root, cache_file, hash_name, template_dir):
+def main(root, cache_file, hash_name, template_dir, change_log):
     env = jinja2.Environment()
     templates = {}
     if template_dir:
@@ -266,8 +272,12 @@ def main(root, cache_file, hash_name, template_dir):
     cache.repage()
     file_groups = cache.get_pending_pages()
 
-    for target_html, description in file_groups.items():
-        write_page_html(templates, root, target_html, description)
+    with contextlib.ExitStack() as stack:
+        if change_log is not None:
+            change_log = stack.enter_context(open(change_log, 'a'))
+
+        for target_html, description in file_groups.items():
+            write_page_html(templates, root, target_html, description, change_log)
 
     cache.update_built_files()
 
