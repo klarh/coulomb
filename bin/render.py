@@ -45,10 +45,10 @@ TEMPLATES = dict(
     {% endfor %}
     <div class="foot">
     {% if next_page %}
-        <a href="{{ next_page }}">Next page</a>
+        <a href="{{ next_page }}"><div class="page_button">Next page</div></a>
     {% endif %}
     {% if previous_page %}
-        <a href="{{ previous_page }}">Previous page</a>
+        <a href="{{ previous_page }}"><div class="page_button">Previous page</div></a>
     {% endif %}
     </div>
     </div>
