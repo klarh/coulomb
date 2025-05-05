@@ -235,7 +235,7 @@ def write_page_html(templates, root, target_filename, description, change_log):
             f.write(templates['post'].render(**template_args))
         entries[-1]['direct_link'] = os.path.relpath(post_file, dirname)
         if change_log is not None:
-            change_log.write('{}\n'.format(post_file))
+            change_log.write('{}\n'.format(os.path.relpath(post_file, root)))
 
     os.makedirs(dirname, exist_ok=True)
     for name in ('next_page', 'previous_page'):
@@ -254,7 +254,7 @@ def write_page_html(templates, root, target_filename, description, change_log):
     with open(target_filename, 'w') as f:
         f.write(templates['post'].render(**template_args))
     if change_log is not None:
-        change_log.write('{}\n'.format(target_filename))
+        change_log.write('{}\n'.format(os.path.relpath(target_filename, root)))
 
 
 def main(root, cache_file, hash_name, template_dir, change_log):
