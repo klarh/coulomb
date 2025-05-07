@@ -24,20 +24,28 @@ parser.add_argument(
 
 
 def main(root, hashes, changelog):
-    assert changelog is not None, 'changelog must currently be passed'
-
     hashes = hashes or ['sha512']
 
     rebuild_directories = collections.defaultdict(set)
-    with open(changelog, 'r') as f:
-        for line in f:
-            if not line.startswith('content/'):
+    if changelog is None:
+        for dirpath, _, fnames in os.walk(root):
+            if not 'content' in dirpath:
                 continue
-
-            line = line.strip()
-            bits = tuple(line.split('/'))
+            reldir = os.path.relpath(dirpath, root)
+            bits = tuple(reldir.split('/'))
             for i in range(1, len(bits)):
                 rebuild_directories[bits[:i]].add(bits[i])
+            rebuild_directories[bits].update(fnames)
+    else:
+        with open(changelog, 'r') as f:
+            for line in f:
+                if not line.startswith('content/'):
+                    continue
+
+                line = line.strip()
+                bits = tuple(line.split('/'))
+                for i in range(1, len(bits)):
+                    rebuild_directories[bits[:i]].add(bits[i])
 
     changelog_pieces = [
         (-len(ds), ds, list(fs)) for (ds, fs) in rebuild_directories.items()
