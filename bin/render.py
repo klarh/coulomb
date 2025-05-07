@@ -125,12 +125,12 @@ class BuildCache:
             'pending_changes.path FROM pending_changes LEFT JOIN '
             'page_dependencies ON page_dependencies.source_file = pending_changes.path '
             'WHERE page_dependencies.target_path IS NULL AND '
-            'pending_changes.is_post ORDER BY pending_changes.ROWID'
+            'pending_changes.is_post ORDER BY pending_changes.path'
         )
         for _ in self.connection.execute(query):
             pass
 
-        query = 'SELECT ROWID, source_file FROM page_dependencies WHERE target_path IS NULL ORDER BY target_path LIMIT ?'
+        query = 'SELECT ROWID, source_file FROM page_dependencies WHERE target_path IS NULL ORDER BY source_file LIMIT ?'
         rows = pagination * [None]
         while len(rows) >= pagination:
             rows = list(self.connection.execute(query, (pagination,)))
@@ -152,19 +152,15 @@ class BuildCache:
         self.connection.execute('COMMIT')
 
     def get_pending_pages(self):
-        prev_query = (
-            'SELECT target_path FROM page_dependencies WHERE target_path < ? LIMIT 1'
-        )
-        next_query = (
-            'SELECT target_path FROM page_dependencies WHERE target_path > ? LIMIT 1'
-        )
+        prev_query = 'SELECT target_path FROM page_dependencies WHERE target_path < ? ORDER BY target_path LIMIT 1'
+        next_query = 'SELECT target_path FROM page_dependencies WHERE target_path > ? ORDER BY target_path LIMIT 1'
 
         query = (
             'SELECT DISTINCT target_path FROM page_dependencies INNER JOIN pending_changes ON '
             'page_dependencies.source_file = pending_changes.path WHERE target_path NOT NULL'
         )
         paths = list(self.connection.execute(query))
-        query = 'SELECT source_file FROM page_dependencies WHERE target_path = ?'
+        query = 'SELECT source_file FROM page_dependencies WHERE target_path = ? ORDER BY source_file DESC'
 
         description = {}
         groups = {}
@@ -182,7 +178,7 @@ class BuildCache:
 
         description['next_page'] = LATEST_PAGE_NAME
 
-        query = 'SELECT source_file FROM page_dependencies WHERE target_path IS NULL'
+        query = 'SELECT source_file FROM page_dependencies WHERE target_path IS NULL ORDER BY source_file DESC'
         description = groups[LATEST_PAGE_NAME] = {}
         if path is not None:
             description['previous_page'] = path
