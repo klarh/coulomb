@@ -59,7 +59,7 @@ def main(root, text, files, signatures, changelogs):
     done = False
     while not done:
         current_time = datetime.datetime.now(datetime.timezone.utc)
-        post_id = current_time.strftime('%Y%m%d%H%M%f')
+        post_id = current_time.strftime('%Y%m%d%H%M%S%f')
 
         post = dict(
             id=post_id,
