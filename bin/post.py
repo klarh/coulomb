@@ -27,9 +27,16 @@ parser.add_argument(
     default=[],
     help='Changelog file to record changes to',
 )
+parser.add_argument(
+    '-l',
+    '--locations',
+    nargs='*',
+    default=[],
+    help='Canonical locations to embed within posts',
+)
 
 
-def main(root, text, files, signatures, changelogs):
+def main(root, text, files, signatures, changelogs, locations):
     sign_keys = {}
     for s in signatures:
         with open(s, 'rb') as f:
@@ -62,9 +69,10 @@ def main(root, text, files, signatures, changelogs):
         post_id = current_time.strftime('%Y%m%d%H%M%S%f')
 
         post = dict(
-            id=post_id,
-            text=text,
             files=files,
+            id=post_id,
+            locations=locations,
+            text=text,
             time=current_time.isoformat(),
         )
 
