@@ -1,0 +1,38 @@
+body {
+    background-color: #efe;
+}
+
+div.center_column {
+    max-width: max(50%, 40em);
+    display: block;
+    margin: 0em auto;
+}
+
+div.post {
+    border-radius: 0.25em;
+    border: 2px solid #666;
+    background-color: #fafafa;
+    padding: 0.5em 1em;
+    margin: 1.5em auto;
+}
+
+div.post > div.timestamp {
+    position: relative;
+    bottom: 0.5em;
+    right: 0em;
+    text-align: right;
+}
+
+div.timestamp > a {
+    text-decoration: none;
+}
+
+div.foot {
+    text-align: center;
+}
+
+div.foot > div.page_button {
+    background-color: #44a;
+    width: 10em;
+    display: inline-block;
+}
