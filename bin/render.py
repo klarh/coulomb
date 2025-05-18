@@ -30,14 +30,14 @@ TEMPLATES = dict(
     post="""<!DOCTYPE html>
 <html lang="en">
 <head>
-    <title>My Webpage</title>
+    <title>{{ text_config.get('user_post.page_title', 'Posts')|e }}</title>
     <link rel="stylesheet" type="text/css" href="{{root_path}}/static/global/style.css">
 </head>
 <body>
     <div class="center_column">
     {% for post in posts %}
         <div class="post">
-            <p>{{ post.text }}</p>
+            <p>{{ post.text|e }}</p>
             <div class="timestamp">
                 <a href="{{ entries[loop.index0].direct_link }}">{{ post.time }}</a>
             </div>
@@ -201,7 +201,9 @@ class BuildCache:
         self.connection.execute('COMMIT')
 
 
-def write_page_html(templates, root, target_filename, description, change_log):
+def write_page_html(
+    templates, root, target_filename, description, change_log, text_config
+):
     print('writing', description, 'to', target_filename)
     target_filename = os.path.join(root, target_filename)
     dirname = os.path.dirname(target_filename)
@@ -225,6 +227,7 @@ def write_page_html(templates, root, target_filename, description, change_log):
             posts=[entries[-1]['content']],
             root_path=os.path.relpath(root, post_dir),
             parent_path=os.path.relpath(target_filename, os.path.dirname(post_file)),
+            text_config=text_config,
         )
         os.makedirs(post_dir, exist_ok=True)
         with open(post_file, 'w') as f:
@@ -245,6 +248,7 @@ def write_page_html(templates, root, target_filename, description, change_log):
         posts=posts,
         **description,
         root_path=os.path.relpath(root, dirname),
+        text_config=text_config,
     )
 
     with open(target_filename, 'w') as f:
@@ -263,6 +267,13 @@ def main(root, cache_file, hash_name, template_dir, change_log):
         for k, v in TEMPLATES.items():
             templates[k] = env.from_string(v)
 
+    try:
+        with open(os.path.join(root, 'config.cbor'), 'rb') as f:
+            config = cbor2.load(f).get('config', {})
+            text_config = config['text_values']
+    except FileNotFoundError:
+        text_config = {}
+
     cache = BuildCache(root, cache_file, hash_name)
     cache.stale_check(os.path.join(root, 'content'))
     cache.repage()
@@ -273,7 +284,9 @@ def main(root, cache_file, hash_name, template_dir, change_log):
             change_log = stack.enter_context(open(change_log, 'a'))
 
         for target_html, description in file_groups.items():
-            write_page_html(templates, root, target_html, description, change_log)
+            write_page_html(
+                templates, root, target_html, description, change_log, text_config
+            )
 
     cache.update_built_files()
 
