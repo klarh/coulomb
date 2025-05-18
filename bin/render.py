@@ -180,8 +180,9 @@ class BuildCache:
 
         query = 'SELECT source_file FROM page_dependencies WHERE target_path IS NULL ORDER BY source_file DESC'
         description = groups[LATEST_PAGE_NAME] = {}
-        if path is not None:
-            description['previous_page'] = path
+        prev_query = 'SELECT target_path FROM page_dependencies WHERE target_path NOT NULL ORDER BY target_path DESC LIMIT 1'
+        for (prevpath,) in self.connection.execute(prev_query):
+            description['previous_page'] = prevpath
         files = groups[LATEST_PAGE_NAME].setdefault('files', [])
         for (filename,) in self.connection.execute(query):
             files.append(filename)
