@@ -60,7 +60,7 @@ def main(root, text, files, signatures, changelogs, locations):
         assert os.path.isfile(name)
         with open(name, 'rb') as f:
             b = f.read()
-        entry['signatures'] = {k: s.sign(b) for k, s in sign_keys.items()}
+        entry['signatures'] = {k: s.sign(b).signature for k, s in sign_keys.items()}
         files.append(entry)
 
     done = False
@@ -78,7 +78,8 @@ def main(root, text, files, signatures, changelogs, locations):
 
         post_enc = cbor2.dumps(post, canonical=True)
         entry = dict(
-            content=post, signatures={k: s.sign(post_enc) for k, s in sign_keys.items()}
+            content=post,
+            signatures={k: s.sign(post_enc).signature for k, s in sign_keys.items()},
         )
 
         time_subdir = current_time.strftime('%Y/%m%d/%H%M')
