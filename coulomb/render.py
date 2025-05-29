@@ -1,8 +1,3 @@
-#!/usr/bin/env -S pipx run
-# /// script
-# dependencies = ["cbor2", "pynacl", "jinja2"]
-# ///
-
 import argparse
 import collections
 import contextlib
@@ -15,16 +10,27 @@ import sqlite3
 import cbor2
 import jinja2
 
-parser = argparse.ArgumentParser(description='Rebuild indices for updated posts')
-parser.add_argument('root', help='Root directory for posts')
-parser.add_argument(
-    '-c', '--cache-file', help='Cache file (sqlite3 db) for tracking smart rebuilds'
-)
-parser.add_argument('-x', '--hash-name', default='sha512', help='Hash function to use')
-parser.add_argument('-t', '--template-dir', help='Template directory')
-parser.add_argument('--change-log', help='Changelog file to write to')
+from .cmd import register_subcommand
 
-LATEST_PAGE_NAME = 'pages/latest.html'
+
+@register_subcommand('render', help='Render HTML views of posts')
+def add_parser_args(parser):
+    parser.add_argument('root', help='Root directory for posts')
+    parser.add_argument(
+        '-c', '--cache-file', help='Cache file (sqlite3 db) for tracking smart rebuilds'
+    )
+    parser.add_argument(
+        '-x', '--hash-name', default='sha512', help='Hash function to use'
+    )
+    parser.add_argument('-t', '--template-dir', help='Template directory')
+    parser.add_argument('--change-log', help='Changelog file to write to')
+    parser.add_argument(
+        '-p', '--post-dir', default='user_posts', help='Subdirectory for post content'
+    )
+    parser.add_argument(
+        '--html-dir', default='user_pages', help='Subdirectory for rendered HTML'
+    )
+
 
 TEMPLATES = dict(
     post="""<!DOCTYPE html>
@@ -58,10 +64,11 @@ TEMPLATES = dict(
 
 
 class BuildCache:
-    def __init__(self, root, filename, hash_name):
+    def __init__(self, root, filename, hash_name, subdir):
         self.root = root
         self.filename = filename
         self.hash_name = hash_name
+        self.subdir = subdir
         self.connection = sqlite3.connect(filename)
 
         self.init()
@@ -137,7 +144,7 @@ class BuildCache:
             if len(rows) >= pagination:
                 target_file = rows[-1][1]
                 target_bits = target_file.split('/')
-                target_bits[0] = 'pages'
+                target_bits[0] = self.subdir
                 index = target_bits[-1].split('.')[1]
                 target_bits[-1] = 'page.{}.html'.format(index)
                 target_file = '/'.join(target_bits)
@@ -176,19 +183,20 @@ class BuildCache:
             for (prevpath,) in self.connection.execute(prev_query, (path,)):
                 description['previous_page'] = prevpath
 
-        description['next_page'] = LATEST_PAGE_NAME
+        latest_page_name = os.path.join(self.subdir, 'latest.html')
+        description['next_page'] = latest_page_name
 
         query = 'SELECT source_file FROM page_dependencies WHERE target_path IS NULL ORDER BY source_file DESC'
-        description = groups[LATEST_PAGE_NAME] = {}
+        description = groups[latest_page_name] = {}
         prev_query = 'SELECT target_path FROM page_dependencies WHERE target_path NOT NULL ORDER BY target_path DESC LIMIT 1'
         for (prevpath,) in self.connection.execute(prev_query):
             description['previous_page'] = prevpath
-        files = groups[LATEST_PAGE_NAME].setdefault('files', [])
+        files = groups[latest_page_name].setdefault('files', [])
         for (filename,) in self.connection.execute(query):
             files.append(filename)
         if not files:
             groups[path].pop('next_page', None)
-            description = groups[LATEST_PAGE_NAME] = dict(groups[path])
+            description = groups[latest_page_name] = dict(groups[path])
 
         return groups
 
@@ -258,7 +266,7 @@ def write_page_html(
         change_log.write('{}\n'.format(os.path.relpath(target_filename, root)))
 
 
-def main(root, cache_file, hash_name, template_dir, change_log):
+def main(root, cache_file, hash_name, template_dir, change_log, post_dir, html_dir):
     env = jinja2.Environment()
     templates = {}
     if template_dir:
@@ -275,8 +283,8 @@ def main(root, cache_file, hash_name, template_dir, change_log):
     except FileNotFoundError:
         text_config = {}
 
-    cache = BuildCache(root, cache_file, hash_name)
-    cache.stale_check(os.path.join(root, 'content'))
+    cache = BuildCache(root, cache_file, hash_name, html_dir)
+    cache.stale_check(os.path.join(root, post_dir))
     cache.repage()
     file_groups = cache.get_pending_pages()
 
@@ -293,4 +301,6 @@ def main(root, cache_file, hash_name, template_dir, change_log):
 
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    add_parser_args(parser)
     main(**vars(parser.parse_args()))

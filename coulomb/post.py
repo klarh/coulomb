@@ -1,49 +1,47 @@
-#!/usr/bin/env -S pipx run
-# /// script
-# dependencies = ["cbor2", "pynacl"]
-# ///
-
 import argparse
-import datetime
 import os
-import shutil
 
 import cbor2
 import nacl.signing
 
-parser = argparse.ArgumentParser(description='Make a post')
-parser.add_argument('root', help='Root directory for posts')
-parser.add_argument('-t', '--text', help='Text content of message')
-parser.add_argument(
-    '-f', '--files', nargs='+', default=[], help='Additional files to store and link'
-)
-parser.add_argument(
-    '-s', '--signatures', nargs='*', default=[], help='Keys to use to sign'
-)
-parser.add_argument(
-    '-c',
-    '--changelogs',
-    nargs='*',
-    default=[],
-    help='Changelog file to record changes to',
-)
-parser.add_argument(
-    '-l',
-    '--locations',
-    nargs='*',
-    default=[],
-    help='Canonical locations to embed within posts',
-)
+from .cmd import register_subcommand
+from .util import read_cbor, write_cbor
+from .TimeArchive import UserPostArchive
 
 
-def main(root, text, files, signatures, changelogs, locations):
+@register_subcommand('post', help='Make a post')
+def add_parser_args(parser):
+    parser.add_argument('root', help='Root directory for posts')
+    parser.add_argument('author', help='Source file containing author info')
+    parser.add_argument('-t', '--text', help='Text content of message')
+    parser.add_argument(
+        '-f',
+        '--files',
+        nargs='+',
+        default=[],
+        help='Additional files to store and link',
+    )
+    parser.add_argument(
+        '-s', '--signatures', nargs='*', default=[], help='Keys to use to sign'
+    )
+    parser.add_argument(
+        '-c',
+        '--changelogs',
+        nargs='*',
+        default=[],
+        help='Changelog file to record changes to',
+    )
+
+
+def main(root, author, text, files, signatures, changelogs):
+    author_info = read_cbor(author)['content']['author']
+
     sign_keys = {}
     for s in signatures:
-        with open(s, 'rb') as f:
-            name = os.path.basename(s)
-            key = cbor2.load(f)['signing']
-            key = nacl.signing.SigningKey(key)
-            sign_keys[name] = key
+        key = read_cbor(s)['signing']
+        key = nacl.signing.SigningKey(key)
+        name = bytes(key.verify_key).hex()
+        sign_keys[name] = key
 
     filenames = files
     assert not any(
@@ -63,17 +61,18 @@ def main(root, text, files, signatures, changelogs, locations):
         entry['signatures'] = {k: s.sign(b).signature for k, s in sign_keys.items()}
         files.append(entry)
 
+    archive = UserPostArchive()
     done = False
     while not done:
-        current_time = datetime.datetime.now(datetime.timezone.utc)
-        post_id = current_time.strftime('%Y%m%d%H%M%S%f')
+        archive_entry = archive.get_path()
+        post_id = archive_entry.id
 
         post = dict(
+            author=author_info,
             files=files,
             id=post_id,
-            locations=locations,
             text=text,
-            time=current_time.isoformat(),
+            time=archive_entry.timestamp.isoformat(),
         )
 
         post_enc = cbor2.dumps(post, canonical=True)
@@ -82,13 +81,11 @@ def main(root, text, files, signatures, changelogs, locations):
             signatures={k: s.sign(post_enc).signature for k, s in sign_keys.items()},
         )
 
-        time_subdir = current_time.strftime('%Y/%m%d/%H%M')
-        target_dir = os.path.join(root, 'content', time_subdir)
-
-        post_fname = os.path.join(target_dir, 'post.{}.cbor'.format(post_id))
+        post_fname = os.path.join(root, archive_entry.path)
         if os.path.exists(post_fname):
             continue
 
+        target_dir = os.path.dirname(post_fname)
         changed_files = [post_fname]
 
         if files:
@@ -100,8 +97,7 @@ def main(root, text, files, signatures, changelogs, locations):
                 changed_files.append(os.path.join(media_dir, os.path.basename(fname)))
 
         os.makedirs(target_dir, exist_ok=True)
-        with open(post_fname, 'wb') as f:
-            cbor2.dump(entry, f, canonical=True)
+        write_cbor({post_fname: entry})
 
         done = True
 
@@ -113,4 +109,6 @@ def main(root, text, files, signatures, changelogs, locations):
 
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    add_parser_args(parser)
     main(**vars(parser.parse_args()))

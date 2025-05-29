@@ -1,8 +1,3 @@
-#!/usr/bin/env -S pipx run
-# /// script
-# dependencies = ["cbor2", "pynacl"]
-# ///
-
 import argparse
 import collections
 import datetime
@@ -13,38 +8,57 @@ import shutil
 import cbor2
 import nacl.signing
 
-parser = argparse.ArgumentParser(description='Rebuild indices for updated posts')
-parser.add_argument('root', help='Root directory for posts')
-parser.add_argument(
-    '-x', '--hashes', nargs='*', default=[], help='Hash functions to use'
-)
-parser.add_argument(
-    '-c', '--changelog', help='Changelog file to use, otherwise manually stat files'
-)
+from .cmd import register_subcommand
 
 
-def main(root, hashes, changelog):
+@register_subcommand(
+    'rebuild_index',
+    'rebuild-index',
+    'reindex',
+    help='Rebuild indices for updated posts',
+)
+def add_parser_args(parser):
+    parser.add_argument('root', help='Root directory for posts')
+    parser.add_argument(
+        '-x', '--hashes', nargs='*', default=[], help='Hash functions to use'
+    )
+    parser.add_argument(
+        '-c', '--changelog', help='Changelog file to use, otherwise manually stat files'
+    )
+    parser.add_argument(
+        '-f',
+        '--filter',
+        nargs='*',
+        dest='filter_',
+        help='Path fragments to require when rebuilding indices',
+    )
+
+
+def main(root, hashes, changelog, filter_):
     hashes = hashes or ['sha512']
 
     rebuild_directories = collections.defaultdict(set)
     if changelog is None:
         for dirpath, _, fnames in os.walk(root):
-            if not 'content' in dirpath:
-                continue
             reldir = os.path.relpath(dirpath, root)
+
+            if filter_ and not any(f in reldir for f in filter_):
+                continue
+
             bits = tuple(reldir.split('/'))
-            for i in range(1, len(bits)):
+            for i in range(len(bits)):
                 rebuild_directories[bits[:i]].add(bits[i])
             rebuild_directories[bits].update(fnames)
     else:
         with open(changelog, 'r') as f:
             for line in f:
-                if not line.startswith('content/'):
+                line = line.strip()
+
+                if filter_ and not any(f in line for f in filter_):
                     continue
 
-                line = line.strip()
                 bits = tuple(line.split('/'))
-                for i in range(1, len(bits)):
+                for i in range(len(bits)):
                     rebuild_directories[bits[:i]].add(bits[i])
 
     changelog_pieces = [
@@ -102,4 +116,6 @@ def main(root, hashes, changelog):
 
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    add_parser_args(parser)
     main(**vars(parser.parse_args()))
