@@ -25,10 +25,14 @@ def add_parser_args(parser):
     parser.add_argument('-t', '--template-dir', help='Template directory')
     parser.add_argument('--change-log', help='Changelog file to write to')
     parser.add_argument(
-        '-p', '--post-dir', default='user_posts', help='Subdirectory for post content'
+        '-p',
+        '--post-dirs',
+        nargs='*',
+        default=['posts'],
+        help='Subdirectories containing post content',
     )
     parser.add_argument(
-        '--html-dir', default='user_pages', help='Subdirectory for rendered HTML'
+        '--html-dir', default='pages', help='Subdirectory for rendered HTML'
     )
 
 
@@ -76,20 +80,23 @@ class BuildCache:
     def init(self):
         with self.connection as conn:
             conn.execute(
-                'CREATE TABLE IF NOT EXISTS page_dependencies (target_path TEXT, source_file TEXT UNIQUE ON CONFLICT REPLACE)'
+                'CREATE TABLE IF NOT EXISTS page_dependencies (target_path TEXT, source_file TEXT UNIQUE ON CONFLICT REPLACE, timestamp TEXT)'
             )
             conn.execute(
                 'CREATE TABLE IF NOT EXISTS last_build (path TEXT UNIQUE ON CONFLICT REPLACE, hash BLOB, hash_name TEXT)'
             )
             conn.execute(
                 'CREATE TABLE IF NOT EXISTS pending_changes (path TEXT UNIQUE ON CONFLICT REPLACE, '
-                'hash BLOB, hash_name TEXT, is_post INTEGER)'
+                'hash BLOB, hash_name TEXT, is_post INTEGER, timestamp TEXT)'
             )
             conn.execute(
                 'CREATE INDEX IF NOT EXISTS dependency_index ON page_dependencies (target_path, source_file)'
             )
             conn.execute(
                 'CREATE INDEX IF NOT EXISTS dependency_source ON page_dependencies (source_file)'
+            )
+            conn.execute(
+                'CREATE INDEX IF NOT EXISTS dependency_timestamp ON page_dependencies (timestamp)'
             )
             conn.execute(
                 'CREATE INDEX IF NOT EXISTS last_build_path ON last_build (path)'
@@ -113,14 +120,27 @@ class BuildCache:
             recurse = index['self_hashes'][self.hash_name] != last_hash
 
         if recurse:
-            query = 'INSERT INTO pending_changes VALUES (?, ?, ?, ?)'
-            qval = (reldir, index['self_hashes'][self.hash_name], self.hash_name, 0)
+            query = 'INSERT INTO pending_changes VALUES (?, ?, ?, ?, ?)'
+            qval = (
+                reldir,
+                index['self_hashes'][self.hash_name],
+                self.hash_name,
+                0,
+                None,
+            )
             curs.execute(query, qval)
 
             for filename, hashval in index['child_hashes'][self.hash_name].items():
                 if not filename.startswith('post.') or not filename.endswith('.cbor'):
                     continue
-                qval = (os.path.join(reldir, filename), hashval, self.hash_name, 1)
+                timestamp = filename.split('.')[-2]
+                qval = (
+                    os.path.join(reldir, filename),
+                    hashval,
+                    self.hash_name,
+                    1,
+                    timestamp,
+                )
                 curs.execute(query, qval)
 
             for subdir in index['dirnames']:
@@ -128,16 +148,16 @@ class BuildCache:
 
     def repage(self, pagination=10):
         query = (
-            'INSERT INTO page_dependencies (source_file) SELECT '
-            'pending_changes.path FROM pending_changes LEFT JOIN '
+            'INSERT INTO page_dependencies (source_file, timestamp) SELECT '
+            'pending_changes.path, pending_changes.timestamp FROM pending_changes LEFT JOIN '
             'page_dependencies ON page_dependencies.source_file = pending_changes.path '
             'WHERE page_dependencies.target_path IS NULL AND '
-            'pending_changes.is_post ORDER BY pending_changes.path'
+            'pending_changes.is_post ORDER BY pending_changes.timestamp'
         )
         for _ in self.connection.execute(query):
             pass
 
-        query = 'SELECT ROWID, source_file FROM page_dependencies WHERE target_path IS NULL ORDER BY source_file LIMIT ?'
+        query = 'SELECT ROWID, source_file FROM page_dependencies WHERE target_path IS NULL ORDER BY timestamp LIMIT ?'
         rows = pagination * [None]
         while len(rows) >= pagination:
             rows = list(self.connection.execute(query, (pagination,)))
@@ -167,7 +187,7 @@ class BuildCache:
             'page_dependencies.source_file = pending_changes.path WHERE target_path NOT NULL'
         )
         paths = list(self.connection.execute(query))
-        query = 'SELECT source_file FROM page_dependencies WHERE target_path = ? ORDER BY source_file DESC'
+        query = 'SELECT source_file FROM page_dependencies WHERE target_path = ? ORDER BY timestamp DESC'
 
         description = {}
         groups = {}
@@ -186,7 +206,7 @@ class BuildCache:
         latest_page_name = os.path.join(self.subdir, 'latest.html')
         description['next_page'] = latest_page_name
 
-        query = 'SELECT source_file FROM page_dependencies WHERE target_path IS NULL ORDER BY source_file DESC'
+        query = 'SELECT source_file FROM page_dependencies WHERE target_path IS NULL ORDER BY timestamp DESC'
         description = groups[latest_page_name] = {}
         prev_query = 'SELECT target_path FROM page_dependencies WHERE target_path NOT NULL ORDER BY target_path DESC LIMIT 1'
         for (prevpath,) in self.connection.execute(prev_query):
@@ -266,7 +286,7 @@ def write_page_html(
         change_log.write('{}\n'.format(os.path.relpath(target_filename, root)))
 
 
-def main(root, cache_file, hash_name, template_dir, change_log, post_dir, html_dir):
+def main(root, cache_file, hash_name, template_dir, change_log, post_dirs, html_dir):
     env = jinja2.Environment()
     templates = {}
     if template_dir:
@@ -284,7 +304,8 @@ def main(root, cache_file, hash_name, template_dir, change_log, post_dir, html_d
         text_config = {}
 
     cache = BuildCache(root, cache_file, hash_name, html_dir)
-    cache.stale_check(os.path.join(root, post_dir))
+    for post_dir in post_dirs:
+        cache.stale_check(os.path.join(root, post_dir))
     cache.repage()
     file_groups = cache.get_pending_pages()
 
