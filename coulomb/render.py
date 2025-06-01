@@ -47,7 +47,7 @@ TEMPLATES = dict(
     <div class="center_column">
     {% for post in posts %}
         <div class="post">
-            <div class="author">{{ post.author.get('config', {}).get('user.display_name', '')|e }}</div>
+            <div class="author">{{ post.author.get('config', {}).get('user.display_name', 'User {}'.format(post.author.id))|e }}</div>
             <p class="post_text">{{ post.text|e }}</p>
             <div class="timestamp">
                 <a href="{{ entries[loop.index0].direct_link }}">{{ post.time }}</a>
