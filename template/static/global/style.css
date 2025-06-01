@@ -16,6 +16,16 @@ div.post {
     margin: 1.5em auto;
 }
 
+div.post > .author {
+    font-weight: bold;
+    color: #888;
+    font-size: 90%;
+}
+
+div.post > .post_text {
+    margin-left: 1em;
+}
+
 div.post > div.timestamp {
     position: relative;
     bottom: 0.5em;
