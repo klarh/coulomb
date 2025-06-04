@@ -1,5 +1,6 @@
 import argparse
 import os
+import shutil
 
 import cbor2
 import nacl.signing
@@ -31,9 +32,10 @@ def add_parser_args(parser):
         default=[],
         help='Changelog file to record changes to',
     )
+    parser.add_argument('--reply', help='If given, reply to the given post file')
 
 
-def main(root, author, text, files, signatures, changelogs):
+def main(root, author, text, files, signatures, changelogs, reply):
     author_info = read_cbor(author)['content']['author']
 
     sign_keys = {}
@@ -61,7 +63,19 @@ def main(root, author, text, files, signatures, changelogs):
         entry['signatures'] = {k: s.sign(b).signature for k, s in sign_keys.items()}
         files.append(entry)
 
-    archive = UserPostArchive()
+    extra_post_fields = {}
+    archive_kwargs = {}
+    if reply is not None:
+        archive_kwargs['entry_format'] = 'reply.{id}.cbor'
+
+        reply_target = read_cbor(reply)['content']
+        extra_post_fields['reply_to'] = dict(
+            author=reply_target['author']['id'],
+            post_id=reply_target['id'],
+        )
+
+    archive = UserPostArchive(**archive_kwargs)
+
     done = False
     while not done:
         archive_entry = archive.get_path()
@@ -73,6 +87,7 @@ def main(root, author, text, files, signatures, changelogs):
             id=post_id,
             text=text,
             time=archive_entry.timestamp.isoformat(),
+            **extra_post_fields,
         )
 
         post_enc = cbor2.dumps(post, canonical=True)
