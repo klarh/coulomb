@@ -79,6 +79,11 @@ def main(root, author, text, files, signatures, changelogs, reply):
     done = False
     while not done:
         archive_entry = archive.get_path()
+
+        post_fname = os.path.join(root, archive_entry.path)
+        if os.path.exists(post_fname):
+            continue
+
         post_id = archive_entry.id
 
         post = dict(
@@ -96,15 +101,11 @@ def main(root, author, text, files, signatures, changelogs, reply):
             signatures={k: s.sign(post_enc).signature for k, s in sign_keys.items()},
         )
 
-        post_fname = os.path.join(root, archive_entry.path)
-        if os.path.exists(post_fname):
-            continue
-
         target_dir = os.path.dirname(post_fname)
         changed_files = [post_fname]
 
         if files:
-            media_dir = os.path.join(target_dir, post_id)
+            media_dir = os.path.join(target_dir, post_id, 'files')
             os.makedirs(media_dir)
             for fname in filenames:
                 shutil.copy(fname, media_dir)
