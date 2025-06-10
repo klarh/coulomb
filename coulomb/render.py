@@ -2,6 +2,7 @@ import argparse
 import collections
 import contextlib
 import datetime
+import enum
 import hashlib
 import os
 import shutil
@@ -68,6 +69,12 @@ TEMPLATES = dict(
 )
 
 
+class EntryType(Enum):
+    directory = 0
+    post = 1
+    reply = 2
+
+
 class BuildCache:
     def __init__(self, root, filename, hash_name, subdir):
         self.root = root
@@ -88,7 +95,7 @@ class BuildCache:
             )
             conn.execute(
                 'CREATE TABLE IF NOT EXISTS pending_changes (path TEXT UNIQUE ON CONFLICT REPLACE, '
-                'hash BLOB, hash_name TEXT, is_post INTEGER, timestamp TEXT)'
+                'hash BLOB, hash_name TEXT, entry_type INTEGER, timestamp TEXT)'
             )
             conn.execute(
                 'CREATE INDEX IF NOT EXISTS dependency_index ON page_dependencies (target_path, source_file)'
@@ -126,20 +133,23 @@ class BuildCache:
                 reldir,
                 index['self_hashes'][self.hash_name],
                 self.hash_name,
-                0,
+                EntryType.directory.value,
                 None,
             )
             curs.execute(query, qval)
 
             for filename, hashval in index['child_hashes'][self.hash_name].items():
-                if not filename.startswith('post.') or not filename.endswith('.cbor'):
+                bits = filename.split('.')
+                if any(
+                    [len(bits) < 3, bits[-3] != 'post', not filename.endswith('.cbor')]
+                ):
                     continue
                 timestamp = filename.split('.')[-2]
                 qval = (
                     os.path.join(reldir, filename),
                     hashval,
                     self.hash_name,
-                    1,
+                    EntryType[bits[-3]].value,
                     timestamp,
                 )
                 curs.execute(query, qval)
@@ -153,7 +163,7 @@ class BuildCache:
             'pending_changes.path, pending_changes.timestamp FROM pending_changes LEFT JOIN '
             'page_dependencies ON page_dependencies.source_file = pending_changes.path '
             'WHERE page_dependencies.target_path IS NULL AND '
-            'pending_changes.is_post ORDER BY pending_changes.timestamp'
+            f'pending_changes.entry_type = {EntryType.post.value} ORDER BY pending_changes.timestamp'
         )
         for _ in self.connection.execute(query):
             pass
