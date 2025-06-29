@@ -140,9 +140,7 @@ class BuildCache:
 
             for filename, hashval in index['child_hashes'][self.hash_name].items():
                 bits = filename.split('.')
-                if any(
-                    [len(bits) < 3, bits[-3] != 'post', not filename.endswith('.cbor')]
-                ):
+                if len(bits) < 3 or bits[-3] != 'post' or not filename.endswith('cbor'):
                     continue
                 timestamp = filename.split('.')[-2]
                 qval = (
