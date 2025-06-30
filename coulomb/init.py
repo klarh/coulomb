@@ -15,9 +15,16 @@ from .TimeArchive import IdentityArchive
 def add_parser_args(parser):
     CommonArgs.add(parser, 'public', 'private', 'change_log')
     parser.add_argument('-s', '--source', help='Source template directory')
+    parser.add_argument(
+        '-p',
+        '--print',
+        dest='print_',
+        default='id',
+        help='Quantity to print (id, private_key_path)',
+    )
 
 
-def main(public, private, source, change_log):
+def main(public, private, source, change_log, print_):
     assert not os.path.exists(public)
     assert os.path.realpath(public) != os.path.realpath(private)
 
@@ -78,6 +85,11 @@ def main(public, private, source, change_log):
                 shutil.copy(os.path.join(dirpath, fname), target_dir)
                 if change_log is not None:
                     change_log.write('{}\n'.format(os.path.join(reldir, fname)))
+
+    if print_ == 'private_key_path':
+        print(private_key_fname)
+    else:
+        print(key_id)
 
 
 if __name__ == '__main__':
