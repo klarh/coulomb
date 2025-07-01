@@ -69,7 +69,7 @@ TEMPLATES = dict(
 )
 
 
-class EntryType(Enum):
+class EntryType(enum.Enum):
     directory = 0
     post = 1
     reply = 2
