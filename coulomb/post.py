@@ -69,9 +69,14 @@ def main(root, author, text, files, signatures, changelogs, reply):
         archive_kwargs['entry_format'] = 'reply.{id}.cbor'
 
         reply_target = read_cbor(reply)['content']
+        reply_author = reply_target['author']['id']
+        assert reply_author.isalnum()
+        archive_kwargs['prefix'] = 'outbox/{}'.format(reply_author)
+        reply_id = reply_target['id']
+
         extra_post_fields['reply_to'] = dict(
-            author=reply_target['author']['id'],
-            post_id=reply_target['id'],
+            author=reply_author,
+            post_id=reply_id,
         )
 
     archive = UserPostArchive(**archive_kwargs)
