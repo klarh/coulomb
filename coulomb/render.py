@@ -76,6 +76,156 @@ class EntryType(enum.Enum):
 
 
 class BuildCache:
+    class Queries:
+        create_page_dependencies = ' '.join(
+            [
+                'CREATE TABLE IF NOT EXISTS page_dependencies (',
+                'target_path TEXT,',
+                'source_file TEXT UNIQUE ON CONFLICT REPLACE,',
+                'timestamp TEXT)',
+            ]
+        )
+        create_last_build = ' '.join(
+            [
+                'CREATE TABLE IF NOT EXISTS last_build (',
+                'path TEXT UNIQUE ON CONFLICT REPLACE,',
+                'hash BLOB, hash_name TEXT)',
+            ]
+        )
+        create_pending_changes = ' '.join(
+            [
+                'CREATE TABLE IF NOT EXISTS pending_changes (',
+                'path TEXT UNIQUE ON CONFLICT REPLACE,'
+                'hash BLOB, hash_name TEXT, entry_type INTEGER,',
+                'timestamp TEXT)',
+            ]
+        )
+        create_dependency_index = ' '.join(
+            [
+                'CREATE INDEX IF NOT EXISTS dependency_index ON',
+                'page_dependencies (target_path, source_file)',
+            ]
+        )
+        create_dependency_source = ' '.join(
+            [
+                'CREATE INDEX IF NOT EXISTS dependency_source ON',
+                'page_dependencies (source_file)',
+            ]
+        )
+        create_dependency_timestamp = ' '.join(
+            [
+                'CREATE INDEX IF NOT EXISTS dependency_timestamp ON',
+                'page_dependencies (timestamp)',
+            ]
+        )
+        create_last_build_path = ' '.join(
+            [
+                'CREATE INDEX IF NOT EXISTS last_build_path ON ',
+                'last_build (path)',
+            ]
+        )
+        create_pending_change_path = ' '.join(
+            [
+                'CREATE INDEX IF NOT EXISTS pending_change_path ON',
+                'pending_changes (path)',
+            ]
+        )
+
+        init = ';'.join(
+            [
+                create_page_dependencies,
+                create_last_build,
+                create_pending_changes,
+                create_dependency_index,
+                create_dependency_source,
+                create_dependency_timestamp,
+                create_last_build_path,
+                create_pending_change_path,
+            ]
+        )
+
+        select_stale_hash = (
+            'SELECT hash FROM last_build WHERE path = ? and hash_name = ?'
+        )
+
+        insert_stale_check = 'INSERT INTO pending_changes VALUES (?, ?, ?, ?, ?)'
+
+        insert_repage = ' '.join(
+            [
+                'INSERT INTO page_dependencies (source_file, timestamp)',
+                'SELECT pending_changes.path, pending_changes.timestamp',
+                'FROM pending_changes LEFT JOIN page_dependencies ON ',
+                'page_dependencies.source_file = pending_changes.path ',
+                'WHERE page_dependencies.target_path IS NULL AND '
+                f'pending_changes.entry_type = {EntryType.post.value}',
+                'ORDER BY pending_changes.timestamp',
+            ]
+        )
+
+        select_repage = ' '.join(
+            [
+                'SELECT ROWID, source_file FROM page_dependencies WHERE',
+                'target_path IS NULL ORDER BY timestamp LIMIT ?',
+            ]
+        )
+
+        update_repage = ' '.join(
+            [
+                'UPDATE page_dependencies SET target_path = ? WHERE ROWID = ?',
+            ]
+        )
+
+        select_prev_page = ' '.join(
+            [
+                'SELECT target_path FROM page_dependencies WHERE',
+                'target_path < ? ORDER BY target_path LIMIT 1',
+            ]
+        )
+
+        select_next_page = ' '.join(
+            [
+                'SELECT target_path FROM page_dependencies WHERE',
+                'target_path > ? ORDER BY target_path LIMIT 1',
+            ]
+        )
+
+        select_pending_dependencies = ' '.join(
+            [
+                'SELECT DISTINCT target_path FROM page_dependencies',
+                'INNER JOIN pending_changes ON',
+                'page_dependencies.source_file = pending_changes.path',
+                'WHERE target_path NOT NULL',
+            ]
+        )
+
+        select_source_pending = ' '.join(
+            [
+                'SELECT source_file FROM page_dependencies',
+                'WHERE target_path = ? ORDER BY timestamp DESC',
+            ]
+        )
+
+        select_null_dependency = ' '.join(
+            [
+                'SELECT source_file FROM page_dependencies',
+                'WHERE target_path IS NULL ORDER BY timestamp DESC',
+            ]
+        )
+
+        select_prev_page_nonnull = ' '.join(
+            [
+                'SELECT target_path FROM page_dependencies',
+                'WHERE target_path NOT NULL ORDER BY target_path DESC LIMIT 1',
+            ]
+        )
+
+        insert_build_update = ' '.join(
+            [
+                'INSERT INTO last_build (path, hash, hash_name) SELECT',
+                'path, hash, hash_name FROM pending_changes',
+            ]
+        )
+
     def __init__(self, root, filename, hash_name, subdir):
         self.root = root
         self.filename = filename
@@ -87,31 +237,7 @@ class BuildCache:
 
     def init(self):
         with self.connection as conn:
-            conn.execute(
-                'CREATE TABLE IF NOT EXISTS page_dependencies (target_path TEXT, source_file TEXT UNIQUE ON CONFLICT REPLACE, timestamp TEXT)'
-            )
-            conn.execute(
-                'CREATE TABLE IF NOT EXISTS last_build (path TEXT UNIQUE ON CONFLICT REPLACE, hash BLOB, hash_name TEXT)'
-            )
-            conn.execute(
-                'CREATE TABLE IF NOT EXISTS pending_changes (path TEXT UNIQUE ON CONFLICT REPLACE, '
-                'hash BLOB, hash_name TEXT, entry_type INTEGER, timestamp TEXT)'
-            )
-            conn.execute(
-                'CREATE INDEX IF NOT EXISTS dependency_index ON page_dependencies (target_path, source_file)'
-            )
-            conn.execute(
-                'CREATE INDEX IF NOT EXISTS dependency_source ON page_dependencies (source_file)'
-            )
-            conn.execute(
-                'CREATE INDEX IF NOT EXISTS dependency_timestamp ON page_dependencies (timestamp)'
-            )
-            conn.execute(
-                'CREATE INDEX IF NOT EXISTS last_build_path ON last_build (path)'
-            )
-            conn.execute(
-                'CREATE INDEX IF NOT EXISTS pending_change_path ON pending_changes (path)'
-            )
+            conn.executescript(self.Queries.init)
 
     def stale_check(self, directory):
         with self.connection as conn:
@@ -119,7 +245,7 @@ class BuildCache:
 
     def stale_check_(self, curs, directory):
         recurse = True
-        query = 'SELECT hash FROM last_build WHERE path = ? and hash_name = ?'
+        query = self.Queries.select_stale_hash
         index = os.path.join(directory, 'index.cbor')
         reldir = os.path.relpath(directory, self.root)
         with open(index, 'rb') as f:
@@ -128,7 +254,7 @@ class BuildCache:
             recurse = index['self_hashes'][self.hash_name] != last_hash
 
         if recurse:
-            query = 'INSERT INTO pending_changes VALUES (?, ?, ?, ?, ?)'
+            query = self.Queries.insert_stale_check
             qval = (
                 reldir,
                 index['self_hashes'][self.hash_name],
@@ -140,14 +266,17 @@ class BuildCache:
 
             for filename, hashval in index['child_hashes'][self.hash_name].items():
                 bits = filename.split('.')
-                if len(bits) < 3 or bits[-3] != 'post' or not filename.endswith('cbor'):
+                if len(bits) < 3 or not filename.endswith('cbor'):
+                    continue
+                entry_type = bits[0]
+                if entry_type not in ('post', 'reply'):
                     continue
                 timestamp = filename.split('.')[-2]
                 qval = (
                     os.path.join(reldir, filename),
                     hashval,
                     self.hash_name,
-                    EntryType[bits[-3]].value,
+                    EntryType[entry_type].value,
                     timestamp,
                 )
                 curs.execute(query, qval)
@@ -156,17 +285,10 @@ class BuildCache:
                 self.stale_check_(curs, os.path.join(directory, subdir))
 
     def repage(self, pagination=10):
-        query = (
-            'INSERT INTO page_dependencies (source_file, timestamp) SELECT '
-            'pending_changes.path, pending_changes.timestamp FROM pending_changes LEFT JOIN '
-            'page_dependencies ON page_dependencies.source_file = pending_changes.path '
-            'WHERE page_dependencies.target_path IS NULL AND '
-            f'pending_changes.entry_type = {EntryType.post.value} ORDER BY pending_changes.timestamp'
-        )
-        for _ in self.connection.execute(query):
+        for _ in self.connection.execute(self.Queries.insert_repage):
             pass
 
-        query = 'SELECT ROWID, source_file FROM page_dependencies WHERE target_path IS NULL ORDER BY timestamp LIMIT ?'
+        query = self.Queries.select_repage
         rows = pagination * [None]
         while len(rows) >= pagination:
             rows = list(self.connection.execute(query, (pagination,)))
@@ -178,25 +300,20 @@ class BuildCache:
                 target_bits[-1] = 'page.{}.html'.format(index)
                 target_file = '/'.join(target_bits)
 
+                insert_query = self.Queries.update_repage
                 for rowid, _ in rows:
-                    insert_query = (
-                        'UPDATE page_dependencies SET target_path = ? WHERE ROWID = ?'
-                    )
                     insert_qargs = (target_file, rowid)
                     self.connection.execute(insert_query, insert_qargs)
 
         self.connection.execute('COMMIT')
 
     def get_pending_pages(self):
-        prev_query = 'SELECT target_path FROM page_dependencies WHERE target_path < ? ORDER BY target_path LIMIT 1'
-        next_query = 'SELECT target_path FROM page_dependencies WHERE target_path > ? ORDER BY target_path LIMIT 1'
+        prev_query = self.Queries.select_prev_page
+        next_query = self.Queries.select_next_page
 
-        query = (
-            'SELECT DISTINCT target_path FROM page_dependencies INNER JOIN pending_changes ON '
-            'page_dependencies.source_file = pending_changes.path WHERE target_path NOT NULL'
-        )
+        query = self.Queries.select_pending_dependencies
         paths = list(self.connection.execute(query))
-        query = 'SELECT source_file FROM page_dependencies WHERE target_path = ? ORDER BY timestamp DESC'
+        query = self.Queries.select_source_pending
 
         description = {}
         groups = {}
@@ -215,12 +332,12 @@ class BuildCache:
         latest_page_name = os.path.join(self.subdir, 'latest.html')
         description['next_page'] = latest_page_name
 
-        query = 'SELECT source_file FROM page_dependencies WHERE target_path IS NULL ORDER BY timestamp DESC'
         description = groups[latest_page_name] = {}
-        prev_query = 'SELECT target_path FROM page_dependencies WHERE target_path NOT NULL ORDER BY target_path DESC LIMIT 1'
+        prev_query = self.Queries.select_prev_page_nonnull
         for (prevpath,) in self.connection.execute(prev_query):
             description['previous_page'] = prevpath
         files = groups[latest_page_name].setdefault('files', [])
+        query = self.Queries.select_null_dependency
         for (filename,) in self.connection.execute(query):
             files.append(filename)
         if not files:
@@ -230,11 +347,7 @@ class BuildCache:
         return groups
 
     def update_built_files(self):
-        query = (
-            'INSERT INTO last_build (path, hash, hash_name) SELECT '
-            'path, hash, hash_name FROM pending_changes'
-        )
-        self.connection.execute(query)
+        self.connection.execute(self.Queries.insert_build_update)
         self.connection.execute('DELETE FROM pending_changes')
         self.connection.execute('COMMIT')
 
