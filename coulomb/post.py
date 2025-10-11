@@ -64,7 +64,7 @@ def main(root, author, text, files, signatures, changelogs, reply):
         files.append(entry)
 
     extra_post_fields = {}
-    archive_kwargs = {}
+    archive_kwargs = dict(user_id=author_info['id'])
     if reply is not None:
         archive_kwargs['entry_format'] = 'reply.{id}.cbor'
 
