@@ -112,22 +112,16 @@ class BuildCache:
                 'page_dependencies (source_file)',
             ]
         )
-        create_dependency_timestamp = ' '.join(
+        create_dependency_pathtime = ' '.join(
             [
-                'CREATE INDEX IF NOT EXISTS dependency_timestamp ON',
-                'page_dependencies (timestamp)',
+                'CREATE INDEX IF NOT EXISTS dependency_path_time ON',
+                'page_dependencies (target_path, timestamp)',
             ]
         )
-        create_last_build_path = ' '.join(
+        create_pending_entrytime = ' '.join(
             [
-                'CREATE INDEX IF NOT EXISTS last_build_path ON ',
-                'last_build (path)',
-            ]
-        )
-        create_pending_change_path = ' '.join(
-            [
-                'CREATE INDEX IF NOT EXISTS pending_change_path ON',
-                'pending_changes (path)',
+                'CREATE INDEX IF NOT EXISTS pending_type_time ON',
+                'pending_changes (entry_type, timestamp)',
             ]
         )
 
@@ -138,9 +132,8 @@ class BuildCache:
                 create_pending_changes,
                 create_dependency_index,
                 create_dependency_source,
-                create_dependency_timestamp,
-                create_last_build_path,
-                create_pending_change_path,
+                create_dependency_pathtime,
+                create_pending_entrytime,
             ]
         )
 
@@ -169,11 +162,7 @@ class BuildCache:
             ]
         )
 
-        update_repage = ' '.join(
-            [
-                'UPDATE page_dependencies SET target_path = ? WHERE ROWID = ?',
-            ]
-        )
+        update_repage = 'UPDATE page_dependencies SET target_path = ? WHERE ROWID = ?'
 
         select_prev_page = ' '.join(
             [
