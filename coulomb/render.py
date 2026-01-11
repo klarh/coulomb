@@ -104,7 +104,7 @@ class BuildCache:
         create_pending_changes = ' '.join(
             [
                 'CREATE TABLE IF NOT EXISTS pending_changes (',
-                'path TEXT UNIQUE ON CONFLICT REPLACE,'
+                'path TEXT UNIQUE ON CONFLICT REPLACE,',
                 'hash BLOB, hash_name TEXT, entry_type INTEGER,',
                 'timestamp TEXT)',
             ]
@@ -113,7 +113,8 @@ class BuildCache:
             [
                 'CREATE TABLE IF NOT EXISTS replies (',
                 'target_user TEXT, target_id TEXT,',
-                'source_file TEXT UNIQUE ON CONFLICT IGNORE)',
+                'source_file TEXT UNIQUE ON CONFLICT IGNORE,',
+                'target_post_pattern TEXT)',
             ]
         )
         create_dependency_index = ' '.join(
@@ -140,6 +141,36 @@ class BuildCache:
                 'pending_changes (entry_type, timestamp)',
             ]
         )
+        create_replies_target = ' '.join(
+            [
+                'CREATE INDEX IF NOT EXISTS replies_target ON',
+                'replies (target_user, target_id)',
+            ]
+        )
+        create_replies_pattern = ' '.join(
+            [
+                'CREATE INDEX IF NOT EXISTS replies_pattern ON',
+                'replies (target_post_pattern)',
+            ]
+        )
+        create_pending_path = ' '.join(
+            [
+                'CREATE INDEX IF NOT EXISTS pending_path ON',
+                'pending_changes (path)',
+            ]
+        )
+        create_last_build_lookup = ' '.join(
+            [
+                'CREATE INDEX IF NOT EXISTS last_build_lookup ON',
+                'last_build (path, hash_name)',
+            ]
+        )
+        create_dependency_target_nonnull = ' '.join(
+            [
+                'CREATE INDEX IF NOT EXISTS dependency_target_nonnull ON',
+                'page_dependencies (target_path) WHERE target_path IS NOT NULL',
+            ]
+        )
 
         init = ';'.join(
             [
@@ -151,6 +182,11 @@ class BuildCache:
                 create_dependency_source,
                 create_dependency_pathtime,
                 create_pending_entrytime,
+                create_replies_target,
+                create_replies_pattern,
+                create_pending_path,
+                create_last_build_lookup,
+                create_dependency_target_nonnull,
             ]
         )
 
@@ -160,7 +196,7 @@ class BuildCache:
 
         insert_stale_check = 'INSERT INTO pending_changes VALUES (?, ?, ?, ?, ?)'
 
-        insert_reply = 'INSERT INTO replies VALUES (?, ?, ?)'
+        insert_reply = 'INSERT INTO replies VALUES (?, ?, ?, ?)'
 
         insert_repage = ' '.join(
             [
@@ -189,25 +225,26 @@ class BuildCache:
                 'SELECT parent.target_path, pending.path, pending.timestamp',
                 'FROM pending_changes AS pending',
                 'JOIN replies ON replies.source_file = pending.path',
-                'JOIN page_dependencies AS parent ON (',
-                '  parent.source_file LIKE',
-                "  'posts/' || replies.target_user || '/%/post.' || replies.target_id || '.cbor'",
-                f') WHERE pending.entry_type = {EntryType.reply.value}',
-                'AND parent.target_path IS NOT NULL;',
+                'JOIN page_dependencies AS parent ON ',
+                'parent.source_file = replies.target_post_pattern',
+                f'WHERE pending.entry_type = {EntryType.reply.value}',
+                'AND parent.target_path IS NOT NULL',
             ]
         )
 
         select_prev_page = ' '.join(
             [
                 'SELECT target_path FROM page_dependencies WHERE',
-                'target_path < ? ORDER BY target_path LIMIT 1',
+                'target_path < ? AND target_path IS NOT NULL',
+                'ORDER BY target_path DESC LIMIT 1',
             ]
         )
 
         select_next_page = ' '.join(
             [
                 'SELECT target_path FROM page_dependencies WHERE',
-                'target_path > ? ORDER BY target_path LIMIT 1',
+                'target_path > ? AND target_path IS NOT NULL',
+                'ORDER BY target_path LIMIT 1',
             ]
         )
 
@@ -216,7 +253,7 @@ class BuildCache:
                 'SELECT DISTINCT target_path FROM page_dependencies',
                 'INNER JOIN pending_changes ON',
                 'page_dependencies.source_file = pending_changes.path',
-                'WHERE target_path NOT NULL',
+                'WHERE target_path IS NOT NULL',
             ]
         )
 
@@ -229,18 +266,6 @@ class BuildCache:
 
         select_null_dependency = ' '.join(
             [
-                'SELECT DISTINCT p.source_file FROM page_dependencies AS p',
-                'LEFT JOIN replies AS r ON (p.source_file LIKE',
-                "  'posts/' || r.target_user || '/%/post.' || r.target_id || '.cbor')",
-                'WHERE p.target_path IS NULL OR r.source_file in (',
-                '  SELECT source_file FROM page_dependencies ',
-                '  WHERE target_path IS NULL)',
-                'ORDER BY p.timestamp DESC',
-            ]
-        )
-
-        select_null_dependency = ' '.join(
-            [
                 'WITH latest_posts AS (',
                 '  SELECT source_file FROM page_dependencies WHERE target_path IS NULL',
                 ')',
@@ -248,17 +273,15 @@ class BuildCache:
                 'UNION ALL',
                 'SELECT p.path FROM pending_changes p',
                 'JOIN replies r ON r.source_file = p.path',
-                'JOIN latest_posts lp ON (',
-                '  lp.source_file LIKE',
-                "  'posts/' || r.target_user || '/%/post.' || r.target_id || '.cbor'",
-                f') WHERE p.entry_type = {EntryType.reply.value}',
+                'JOIN latest_posts lp ON lp.source_file = r.target_post_pattern',
+                f'WHERE p.entry_type = {EntryType.reply.value}',
             ]
         )
 
         select_prev_page_nonnull = ' '.join(
             [
                 'SELECT target_path FROM page_dependencies',
-                'WHERE target_path NOT NULL ORDER BY target_path DESC LIMIT 1',
+                'WHERE target_path IS NOT NULL ORDER BY target_path DESC LIMIT 1',
             ]
         )
 
@@ -352,8 +375,13 @@ class BuildCache:
         elif not target_id.isalnum():
             return None
 
+        # Directly build reply target filename to avoid dynamic LIKE matches
+        target_post_pattern = f'posts/{target_author}/{target_id}/post.{target_id}.cbor'
+
         query = self.Queries.insert_reply
-        return curs.execute(query, (target_author, target_id, relpath))
+        return curs.execute(
+            query, (target_author, target_id, relpath, target_post_pattern)
+        )
 
     def repage(self, pagination=10):
         # place all pending changes posts into page_dependencies
@@ -382,7 +410,7 @@ class BuildCache:
         for _ in self.connection.execute(self.Queries.insert_replies_repage):
             pass
 
-        self.connection.execute('COMMIT')
+        self.connection.commit()
 
     def get_pending_pages(self):
         prev_query = self.Queries.select_prev_page
@@ -426,7 +454,7 @@ class BuildCache:
     def update_built_files(self):
         self.connection.execute(self.Queries.insert_build_update)
         self.connection.execute(self.Queries.delete_after_update)
-        self.connection.execute('COMMIT')
+        self.connection.commit()
 
 
 def write_page_html(
