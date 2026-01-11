@@ -507,7 +507,7 @@ def write_page_html(
 
     for p in post_index.values():
         if 'replies' in p:
-            p['replies'].sort(key=lambda x: x['time'], reverse=True)
+            p['replies'].sort(key=lambda x: x['time'])
 
     posts.sort(key=lambda x: x['time'], reverse=True)
 
