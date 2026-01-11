@@ -66,13 +66,16 @@ def main(root, author, text, files, signatures, changelogs, reply):
     extra_post_fields = {}
     archive_kwargs = dict(user_id=author_info['id'])
     if reply is not None:
-        archive_kwargs['entry_format'] = 'reply.{id}.cbor'
-
         reply_target = read_cbor(reply)['content']
         reply_author = reply_target['author']['id']
         assert reply_author.isalnum()
         reply_id = reply_target['id']
 
+        archive_kwargs['entry_format'] = (
+            'replies/{reply_author}/{target_id}/reply.{{id}}.cbor'.format(
+                reply_author=reply_author, target_id=reply_id
+            )
+        )
         extra_post_fields['reply_to'] = dict(
             author=reply_author,
             post_id=reply_id,

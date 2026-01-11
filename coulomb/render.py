@@ -53,6 +53,15 @@ TEMPLATES = dict(
             <div class="timestamp">
                 <a href="{{ entries[loop.index0].direct_link }}">{{ post.time }}</a>
             </div>
+        {% for reply in post.get('replies', []) %}
+            <div class="post">
+                <div class="author">{{ reply.author.get('config', {}).get('user.display_name', 'User {}'.format(reply.author.id))|e }}</div>
+                <p class="post_text">{{ reply.text|e }}</p>
+                <div class="timestamp">
+                    <a href="{{ entries[loop.index0].direct_link }}">{{ reply.time }}</a>
+                </div>
+            </div>
+        {% endfor %}
         </div>
     {% endfor %}
     <div class="foot">
@@ -100,6 +109,13 @@ class BuildCache:
                 'timestamp TEXT)',
             ]
         )
+        create_reply = ' '.join(
+            [
+                'CREATE TABLE IF NOT EXISTS replies (',
+                'target_user TEXT, target_id TEXT,',
+                'source_file TEXT UNIQUE ON CONFLICT IGNORE)',
+            ]
+        )
         create_dependency_index = ' '.join(
             [
                 'CREATE INDEX IF NOT EXISTS dependency_index ON',
@@ -130,6 +146,7 @@ class BuildCache:
                 create_page_dependencies,
                 create_last_build,
                 create_pending_changes,
+                create_reply,
                 create_dependency_index,
                 create_dependency_source,
                 create_dependency_pathtime,
@@ -142,6 +159,8 @@ class BuildCache:
         )
 
         insert_stale_check = 'INSERT INTO pending_changes VALUES (?, ?, ?, ?, ?)'
+
+        insert_reply = 'INSERT INTO replies VALUES (?, ?, ?)'
 
         insert_repage = ' '.join(
             [
@@ -163,6 +182,20 @@ class BuildCache:
         )
 
         update_repage = 'UPDATE page_dependencies SET target_path = ? WHERE ROWID = ?'
+
+        insert_replies_repage = ' '.join(
+            [
+                'INSERT INTO page_dependencies (target_path, source_file, timestamp)',
+                'SELECT parent.target_path, pending.path, pending.timestamp',
+                'FROM pending_changes AS pending',
+                'JOIN replies ON replies.source_file = pending.path',
+                'JOIN page_dependencies AS parent ON (',
+                '  parent.source_file LIKE',
+                "  'posts/' || replies.target_user || '/%/post.' || replies.target_id || '.cbor'",
+                f') WHERE pending.entry_type = {EntryType.reply.value}',
+                'AND parent.target_path IS NOT NULL;',
+            ]
+        )
 
         select_prev_page = ' '.join(
             [
@@ -196,8 +229,29 @@ class BuildCache:
 
         select_null_dependency = ' '.join(
             [
-                'SELECT source_file FROM page_dependencies',
-                'WHERE target_path IS NULL ORDER BY timestamp DESC',
+                'SELECT DISTINCT p.source_file FROM page_dependencies AS p',
+                'LEFT JOIN replies AS r ON (p.source_file LIKE',
+                "  'posts/' || r.target_user || '/%/post.' || r.target_id || '.cbor')",
+                'WHERE p.target_path IS NULL OR r.source_file in (',
+                '  SELECT source_file FROM page_dependencies ',
+                '  WHERE target_path IS NULL)',
+                'ORDER BY p.timestamp DESC',
+            ]
+        )
+
+        select_null_dependency = ' '.join(
+            [
+                'WITH latest_posts AS (',
+                '  SELECT source_file FROM page_dependencies WHERE target_path IS NULL',
+                ')',
+                'SELECT source_file FROM latest_posts',
+                'UNION ALL',
+                'SELECT p.path FROM pending_changes p',
+                'JOIN replies r ON r.source_file = p.path',
+                'JOIN latest_posts lp ON (',
+                '  lp.source_file LIKE',
+                "  'posts/' || r.target_user || '/%/post.' || r.target_id || '.cbor'",
+                f') WHERE p.entry_type = {EntryType.reply.value}',
             ]
         )
 
@@ -212,6 +266,14 @@ class BuildCache:
             [
                 'INSERT INTO last_build (path, hash, hash_name) SELECT',
                 'path, hash, hash_name FROM pending_changes',
+            ]
+        )
+
+        delete_after_update = ' '.join(
+            [
+                'DELETE FROM pending_changes WHERE EXISTS (',
+                '  SELECT 1 FROM page_dependencies WHERE',
+                '  page_dependencies.source_file = pending_changes.path)',
             ]
         )
 
@@ -261,8 +323,9 @@ class BuildCache:
                 if entry_type not in ('post', 'reply'):
                     continue
                 timestamp = filename.split('.')[-2]
+                relpath = os.path.join(reldir, filename)
                 qval = (
-                    os.path.join(reldir, filename),
+                    relpath,
                     hashval,
                     self.hash_name,
                     EntryType[entry_type].value,
@@ -270,17 +333,39 @@ class BuildCache:
                 )
                 curs.execute(query, qval)
 
+                if entry_type == 'reply':
+                    self.parse_reply(curs, relpath)
+
             for subdir in index['dirnames']:
                 self.stale_check_(curs, os.path.join(directory, subdir))
 
+    def parse_reply(self, curs, relpath):
+        bits = relpath.split('/')
+        try:
+            target_author = bits[-3]
+            target_id = bits[-2]
+        except IndexError:
+            return None
+
+        if not target_author.isalnum():
+            return None
+        elif not target_id.isalnum():
+            return None
+
+        query = self.Queries.insert_reply
+        return curs.execute(query, (target_author, target_id, relpath))
+
     def repage(self, pagination=10):
+        # place all pending changes posts into page_dependencies
         for _ in self.connection.execute(self.Queries.insert_repage):
             pass
 
-        query = self.Queries.select_repage
+        # assign page targets if a page's worth of unpaged posts exist
+        select_query = self.Queries.select_repage
+        insert_query = self.Queries.update_repage
         rows = pagination * [None]
         while len(rows) >= pagination:
-            rows = list(self.connection.execute(query, (pagination,)))
+            rows = list(self.connection.execute(select_query, (pagination,)))
             if len(rows) >= pagination:
                 target_file = rows[-1][1]
                 target_bits = target_file.split('/')
@@ -289,10 +374,13 @@ class BuildCache:
                 target_bits[-1] = 'page.{}.html'.format(index)
                 target_file = '/'.join(target_bits)
 
-                insert_query = self.Queries.update_repage
                 for rowid, _ in rows:
                     insert_qargs = (target_file, rowid)
                     self.connection.execute(insert_query, insert_qargs)
+
+        # add replies to the dependency graph of any pages that exist
+        for _ in self.connection.execute(self.Queries.insert_replies_repage):
+            pass
 
         self.connection.execute('COMMIT')
 
@@ -337,7 +425,7 @@ class BuildCache:
 
     def update_built_files(self):
         self.connection.execute(self.Queries.insert_build_update)
-        self.connection.execute('DELETE FROM pending_changes')
+        self.connection.execute(self.Queries.delete_after_update)
         self.connection.execute('COMMIT')
 
 
@@ -382,7 +470,47 @@ def write_page_html(
             description[name] = os.path.relpath(
                 os.path.join(root, description[name]), dirname
             )
-    posts = [entry['content'] for entry in entries]
+    selected_posts = [entry['content'] for entry in entries]
+
+    make_key = lambda p: (p['author']['id'], p['id'])
+    post_index = {}
+    roots = {}
+    posts = []
+    pending = []
+    for p in selected_posts:
+        key = make_key(p)
+        post_index[key] = p
+        if 'reply_to' in p:
+            key = (p['reply_to']['author'], p['reply_to']['post_id'])
+            pending.append((key, p))
+        else:
+            posts.append(p)
+            roots[key] = p
+
+    while pending:
+        progress = False
+        pending.sort(key=lambda x: x[0] in roots)
+        while pending and pending[-1][0] in roots:
+            progress = True
+            parent_key, child = pending.pop()
+            roots[make_key(child)] = roots[parent_key]
+        if not progress:
+            print('WARNING: child graph traversal issue')
+            break
+
+    for k, root_post in roots.items():
+        # skip root-level posts
+        if k == make_key(root_post):
+            continue
+
+        root_post.setdefault('replies', []).append(post_index[k])
+
+    for p in post_index.values():
+        if 'replies' in p:
+            p['replies'].sort(key=lambda x: x['time'], reverse=True)
+
+    posts.sort(key=lambda x: x['time'], reverse=True)
+
     template_args = dict(
         entries=entries,
         posts=posts,
