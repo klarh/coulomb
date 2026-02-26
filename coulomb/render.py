@@ -113,8 +113,15 @@ class BuildCache:
             [
                 'CREATE TABLE IF NOT EXISTS replies (',
                 'target_user TEXT, target_id TEXT,',
-                'source_file TEXT UNIQUE ON CONFLICT IGNORE,',
-                'target_post_pattern TEXT)',
+                'source_file TEXT UNIQUE ON CONFLICT IGNORE)',
+            ]
+        )
+        create_post_paths = ' '.join(
+            [
+                'CREATE TABLE IF NOT EXISTS post_paths (',
+                'author TEXT, post_id TEXT,',
+                'source_file TEXT,',
+                'UNIQUE(author, post_id) ON CONFLICT REPLACE)',
             ]
         )
         create_dependency_index = ' '.join(
@@ -147,10 +154,10 @@ class BuildCache:
                 'replies (target_user, target_id)',
             ]
         )
-        create_replies_pattern = ' '.join(
+        create_post_paths_lookup = ' '.join(
             [
-                'CREATE INDEX IF NOT EXISTS replies_pattern ON',
-                'replies (target_post_pattern)',
+                'CREATE INDEX IF NOT EXISTS post_paths_lookup ON',
+                'post_paths (author, post_id)',
             ]
         )
         create_pending_path = ' '.join(
@@ -178,12 +185,13 @@ class BuildCache:
                 create_last_build,
                 create_pending_changes,
                 create_reply,
+                create_post_paths,
                 create_dependency_index,
                 create_dependency_source,
                 create_dependency_pathtime,
                 create_pending_entrytime,
                 create_replies_target,
-                create_replies_pattern,
+                create_post_paths_lookup,
                 create_pending_path,
                 create_last_build_lookup,
                 create_dependency_target_nonnull,
@@ -196,7 +204,9 @@ class BuildCache:
 
         insert_stale_check = 'INSERT INTO pending_changes VALUES (?, ?, ?, ?, ?)'
 
-        insert_reply = 'INSERT INTO replies VALUES (?, ?, ?, ?)'
+        insert_reply = 'INSERT INTO replies VALUES (?, ?, ?)'
+
+        insert_post_path = 'INSERT INTO post_paths VALUES (?, ?, ?)'
 
         insert_repage = ' '.join(
             [
@@ -221,14 +231,27 @@ class BuildCache:
 
         insert_replies_repage = ' '.join(
             [
+                'WITH RECURSIVE reply_roots(target_path, reply_file, reply_timestamp) AS (',
+                '  SELECT parent.target_path, pending.path, pending.timestamp',
+                '  FROM pending_changes AS pending',
+                '  JOIN replies ON replies.source_file = pending.path',
+                '  JOIN post_paths ON post_paths.author = replies.target_user',
+                '  AND post_paths.post_id = replies.target_id',
+                '  JOIN page_dependencies AS parent ON',
+                '  parent.source_file = post_paths.source_file',
+                f'  WHERE pending.entry_type = {EntryType.reply.value}',
+                '  AND parent.target_path IS NOT NULL',
+                '  UNION',
+                '  SELECT rr.target_path, pending.path, pending.timestamp',
+                '  FROM pending_changes AS pending',
+                '  JOIN replies ON replies.source_file = pending.path',
+                '  JOIN post_paths ON post_paths.author = replies.target_user',
+                '  AND post_paths.post_id = replies.target_id',
+                '  JOIN reply_roots rr ON rr.reply_file = post_paths.source_file',
+                f'  WHERE pending.entry_type = {EntryType.reply.value}',
+                ')',
                 'INSERT INTO page_dependencies (target_path, source_file, timestamp)',
-                'SELECT parent.target_path, pending.path, pending.timestamp',
-                'FROM pending_changes AS pending',
-                'JOIN replies ON replies.source_file = pending.path',
-                'JOIN page_dependencies AS parent ON ',
-                'parent.source_file = replies.target_post_pattern',
-                f'WHERE pending.entry_type = {EntryType.reply.value}',
-                'AND parent.target_path IS NOT NULL',
+                'SELECT target_path, reply_file, reply_timestamp FROM reply_roots',
             ]
         )
 
@@ -266,15 +289,15 @@ class BuildCache:
 
         select_null_dependency = ' '.join(
             [
-                'WITH latest_posts AS (',
+                'WITH RECURSIVE latest_tree(source_file) AS (',
                 '  SELECT source_file FROM page_dependencies WHERE target_path IS NULL',
+                '  UNION',
+                '  SELECT r.source_file FROM latest_tree lt',
+                '  INNER JOIN post_paths pp ON pp.source_file = lt.source_file',
+                '  INNER JOIN replies r ON r.target_user = pp.author',
+                '  AND r.target_id = pp.post_id',
                 ')',
-                'SELECT source_file FROM latest_posts',
-                'UNION ALL',
-                'SELECT p.path FROM pending_changes p',
-                'JOIN replies r ON r.source_file = p.path',
-                'JOIN latest_posts lp ON lp.source_file = r.target_post_pattern',
-                f'WHERE p.entry_type = {EntryType.reply.value}',
+                'SELECT source_file FROM latest_tree',
             ]
         )
 
@@ -356,6 +379,14 @@ class BuildCache:
                 )
                 curs.execute(query, qval)
 
+                path_parts = relpath.split('/')
+                if len(path_parts) >= 2 and path_parts[1].isalnum():
+                    entry_id = bits[1]
+                    curs.execute(
+                        self.Queries.insert_post_path,
+                        (path_parts[1], entry_id, relpath),
+                    )
+
                 if entry_type == 'reply':
                     self.parse_reply(curs, relpath)
 
@@ -375,13 +406,9 @@ class BuildCache:
         elif not target_id.isalnum():
             return None
 
-        # Directly build reply target filename to avoid dynamic LIKE matches
-        target_post_pattern = f'posts/{target_author}/{target_id}/post.{target_id}.cbor'
-
         query = self.Queries.insert_reply
-        return curs.execute(
-            query, (target_author, target_id, relpath, target_post_pattern)
-        )
+        qargs = (target_author, target_id, relpath)
+        return curs.execute(query, qargs)
 
     def repage(self, pagination=10):
         # place all pending changes posts into page_dependencies
