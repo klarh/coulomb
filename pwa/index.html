@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#1a1a2e">
+  <meta name="description" content="Coulomb - Decentralized microblogging PWA">
+  <title>Coulomb</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header>
+    <h1>⚡ Coulomb</h1>
+    <nav>
+      <button id="nav-compose" class="nav-btn active">Compose</button>
+      <button id="nav-identity" class="nav-btn">Identity</button>
+      <button id="nav-sync" class="nav-btn">Sync</button>
+    </nav>
+  </header>
+
+  <main>
+    <!-- Loading screen shown while Pyodide initializes -->
+    <section id="loading-screen">
+      <div class="loading-container">
+        <p>Loading Coulomb runtime…</p>
+        <progress id="load-progress" max="100" value="0"></progress>
+        <p id="load-status">Initializing…</p>
+      </div>
+    </section>
+
+    <!-- Compose view -->
+    <section id="view-compose" class="view hidden">
+      <div class="compose-box">
+        <textarea id="post-text" placeholder="What's on your mind?" rows="6"></textarea>
+        <div class="compose-actions">
+          <label class="file-attach-btn">
+            📎 Attach
+            <input type="file" id="post-files" multiple hidden>
+          </label>
+          <div id="attached-files"></div>
+          <button id="btn-post" class="primary-btn">Post</button>
+        </div>
+      </div>
+      <div id="post-status" class="status-msg hidden"></div>
+      <div id="recent-posts">
+        <h2>Recent Posts</h2>
+        <div id="posts-list"></div>
+      </div>
+    </section>
+
+    <!-- Identity view -->
+    <section id="view-identity" class="view hidden">
+      <div id="identity-status"></div>
+      <div id="identity-info" class="hidden">
+        <h2>Your Identity</h2>
+        <div id="identity-details"></div>
+        <div class="identity-actions">
+          <label for="display-name">Display Name</label>
+          <input type="text" id="display-name" placeholder="Your name">
+          <button id="btn-set-name" class="primary-btn">Update Name</button>
+        </div>
+      </div>
+      <div id="identity-init" class="hidden">
+        <h2>Get Started</h2>
+        <p>No identity found. Initialize one to start posting.</p>
+        <button id="btn-init" class="primary-btn">Initialize Identity</button>
+      </div>
+    </section>
+
+    <!-- Sync view -->
+    <section id="view-sync" class="view hidden">
+      <div class="sync-config">
+        <h2>Storage Backend</h2>
+        <div class="backend-selector">
+          <select id="backend-select">
+            <option value="github">GitHub Pages</option>
+            <option value="local" disabled>Local Only</option>
+          </select>
+        </div>
+
+        <div id="github-config" class="backend-config">
+          <h3>GitHub Pages</h3>
+          <div id="github-auth-status"></div>
+          <div id="github-not-connected">
+            <p>Connect to a GitHub repository to publish your posts.</p>
+            <label for="github-token">Personal Access Token</label>
+            <input type="password" id="github-token" placeholder="ghp_...">
+            <label for="github-repo">Repository (owner/repo)</label>
+            <input type="text" id="github-repo" placeholder="username/username.github.io">
+            <label for="github-branch">Branch</label>
+            <input type="text" id="github-branch" placeholder="main" value="main">
+            <label for="github-path-prefix">Path Prefix (optional)</label>
+            <input type="text" id="github-path-prefix" placeholder="e.g. blog/">
+            <button id="btn-github-connect" class="primary-btn">Connect</button>
+          </div>
+          <div id="github-connected" class="hidden">
+            <p id="github-repo-display"></p>
+            <button id="btn-github-disconnect" class="secondary-btn">Disconnect</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="sync-actions">
+        <h2>Publish</h2>
+        <div id="sync-status"></div>
+        <div id="pending-changes"></div>
+        <button id="btn-publish" class="primary-btn" disabled>Publish Changes</button>
+      </div>
+    </section>
+  </main>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
