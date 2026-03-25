@@ -141,6 +141,53 @@ TEMPLATES = dict(
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{{ text_config.get('user_post.page_title', 'Posts')|e }}</title>
     <link rel="stylesheet" type="text/css" href="{{root_path}}/static/global/style.css">
+    {% if text_config.get('theme.accent') or text_config.get('theme.mode') %}
+    <style>
+      :root {
+        {% if text_config.get('theme.accent') %}--accent: {{ text_config['theme.accent'] }};{% endif %}
+        {% if text_config.get('theme.accent') %}--accent-hover: {{ text_config['theme.accent'] }};{% endif %}
+      }
+      {% if text_config.get('theme.mode') == 'dark' %}
+      :root {
+        --bg: #15202b;
+        --surface: #192734;
+        --surface-hover: #1e2d3d;
+        --text: #d9d9d9;
+        --text-muted: #8899a6;
+        --border: #38444d;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #15202b;
+          --surface: #192734;
+          --surface-hover: #1e2d3d;
+          --text: #d9d9d9;
+          --text-muted: #8899a6;
+          --border: #38444d;
+        }
+      }
+      {% elif text_config.get('theme.mode') == 'light' %}
+      :root {
+        --bg: #f5f8fa;
+        --surface: #ffffff;
+        --surface-hover: #f5f8fa;
+        --text: #14171a;
+        --text-muted: #657786;
+        --border: #e1e8ed;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #f5f8fa;
+          --surface: #ffffff;
+          --surface-hover: #f5f8fa;
+          --text: #14171a;
+          --text-muted: #657786;
+          --border: #e1e8ed;
+        }
+      }
+      {% endif %}
+    </style>
+    {% endif %}
 </head>
 <body>
     <div class="feed">

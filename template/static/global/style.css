@@ -1,3 +1,27 @@
+:root {
+  --bg: #f5f8fa;
+  --surface: #ffffff;
+  --surface-hover: #f5f8fa;
+  --text: #14171a;
+  --text-muted: #657786;
+  --accent: #1da1f2;
+  --accent-hover: #1a91da;
+  --border: #e1e8ed;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #15202b;
+    --surface: #192734;
+    --surface-hover: #1e2d3d;
+    --text: #d9d9d9;
+    --text-muted: #8899a6;
+    --accent: #1da1f2;
+    --accent-hover: #1a91da;
+    --border: #38444d;
+  }
+}
+
 *, *::before, *::after {
     box-sizing: border-box;
     margin: 0;
@@ -6,8 +30,8 @@
 
 body {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-    background-color: #f5f8fa;
-    color: #14171a;
+    background-color: var(--bg);
+    color: var(--text);
     line-height: 1.5;
 }
 
@@ -18,14 +42,14 @@ body {
 
 /* Post card */
 .post-card {
-    background: #fff;
-    border-bottom: 1px solid #e1e8ed;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
     padding: 1rem 1rem 0.75rem;
     transition: background 0.15s;
 }
 
 .post-card:hover {
-    background: #f5f8fa;
+    background: var(--surface-hover);
 }
 
 /* Header row: avatar, meta, timestamp */
@@ -59,7 +83,7 @@ body {
 .display-name {
     font-weight: 700;
     font-size: 0.95rem;
-    color: #14171a;
+    color: var(--text);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -76,7 +100,7 @@ body {
 
 .handle {
     font-size: 0.8rem;
-    color: #657786;
+    color: var(--text-muted);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -84,14 +108,14 @@ body {
 
 .post-time {
     font-size: 0.8rem;
-    color: #657786;
+    color: var(--text-muted);
     text-decoration: none;
     white-space: nowrap;
     margin-left: auto;
 }
 
 .post-time:hover {
-    color: #1da1f2;
+    color: var(--accent);
     text-decoration: underline;
 }
 
@@ -109,7 +133,7 @@ body {
 .reply-card {
     margin-left: 52px;
     padding: 0.5rem 0 0.25rem;
-    border-top: 1px solid #e1e8ed;
+    border-top: 1px solid var(--border);
 }
 
 .reply-card .post-body {
@@ -130,7 +154,7 @@ body {
     display: inline-block;
     padding: 0.5rem 1.25rem;
     border-radius: 9999px;
-    background: #1da1f2;
+    background: var(--accent);
     color: #fff;
     text-decoration: none;
     font-size: 0.9rem;
@@ -139,46 +163,5 @@ body {
 }
 
 .page-btn:hover {
-    background: #1a91da;
-}
-
-/* Dark mode */
-@media (prefers-color-scheme: dark) {
-    body {
-        background-color: #15202b;
-        color: #d9d9d9;
-    }
-
-    .post-card {
-        background: #192734;
-        border-bottom-color: #38444d;
-    }
-
-    .post-card:hover {
-        background: #1e2d3d;
-    }
-
-    .display-name {
-        color: #d9d9d9;
-    }
-
-    .handle, .post-time {
-        color: #8899a6;
-    }
-
-    .post-time:hover {
-        color: #1da1f2;
-    }
-
-    .reply-card {
-        border-top-color: #38444d;
-    }
-
-    .page-btn {
-        background: #1da1f2;
-    }
-
-    .page-btn:hover {
-        background: #1a91da;
-    }
+    background: var(--accent-hover);
 }

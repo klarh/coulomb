@@ -784,26 +784,6 @@ label {
   white-space: nowrap;
 }
 
-.sidebar-account-delete {
-  background: none;
-  border: none;
-  color: var(--text-muted);
-  cursor: pointer;
-  font-size: 0.9rem;
-  padding: 0.25rem;
-  flex-shrink: 0;
-  opacity: 0;
-  transition: opacity 0.15s;
-}
-
-.sidebar-account:hover .sidebar-account-delete {
-  opacity: 1;
-}
-
-.sidebar-account-delete:hover {
-  color: var(--accent);
-}
-
 /* Sidebar create account row */
 .sidebar-create {
   display: flex;
@@ -850,4 +830,78 @@ label {
   text-align: left;
   width: 100%;
   padding: 0.5rem 0.75rem;
+}
+
+/* Light theme */
+[data-theme="light"] {
+  --bg: #f5f8fa;
+  --surface: #ffffff;
+  --surface-2: #e8eef3;
+  --text: #14171a;
+  --text-muted: #657786;
+  --border: #e1e8ed;
+}
+
+/* Theme settings */
+.theme-settings {
+  margin: 0.75rem 0;
+}
+
+.color-picker-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.color-picker-row input[type="color"] {
+  width: 40px;
+  height: 40px;
+  border: 2px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  padding: 2px;
+  background: var(--surface);
+}
+
+.color-hex {
+  font-family: monospace;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+/* Danger zone */
+.danger-zone {
+  margin-top: 2rem;
+  padding-top: 1rem;
+  border-top: 2px solid #e94560;
+}
+
+.danger-zone h3 {
+  color: #e94560;
+  margin-bottom: 0.5rem;
+  font-size: 1rem;
+}
+
+.danger-zone p {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  margin-bottom: 0.75rem;
+}
+
+.danger-btn {
+  background: #e94560;
+  color: white;
+  border: none;
+  padding: 0.75rem 1.5rem;
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 600;
+  width: 100%;
+  transition: background 0.2s;
+}
+
+.danger-btn:hover {
+  background: #d63851;
 }

@@ -14,6 +14,21 @@ import { GitHubPagesBackend } from './storage/github.js';
 import { renderFeed } from './feed-renderer.js';
 import { generateIdenticonSVG } from './identicon.js';
 
+// ── Theme ──
+function applyTheme(accent, mode) {
+  if (accent) {
+    document.documentElement.style.setProperty('--accent', accent);
+  }
+  if (mode === 'light') {
+    document.documentElement.setAttribute('data-theme', 'light');
+  } else if (mode === 'auto') {
+    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    document.documentElement.setAttribute('data-theme', prefersDark ? 'dark' : 'light');
+  } else {
+    document.documentElement.removeAttribute('data-theme');
+  }
+}
+
 // ── State ──
 let pyodide = null;
 let backend = new GitHubPagesBackend();
@@ -69,6 +84,10 @@ for item in os.listdir(old):
     }
 
     backend.tryRestore();
+
+    // Apply saved theme immediately
+    const savedTheme = JSON.parse(localStorage.getItem('coulomb_theme') || '{}');
+    applyTheme(savedTheme.accent, savedTheme.mode);
 
     document.getElementById('loading-screen').classList.add('hidden');
     showView('feed');
@@ -136,6 +155,12 @@ function bindEvents() {
   document.getElementById('btn-request-key').addEventListener('click', handleRequestKey);
   document.getElementById('btn-provision-send').addEventListener('click', handleProvisionSend);
   document.getElementById('btn-provision-receive').addEventListener('click', handleProvisionReceive);
+
+  // Theme color picker live preview
+  document.getElementById('theme-accent').addEventListener('input', (e) => {
+    document.getElementById('theme-accent-hex').textContent = e.target.value;
+    document.documentElement.style.setProperty('--accent', e.target.value);
+  });
 }
 
 // ── Feed ──
@@ -329,11 +354,20 @@ async function handleRemoveLocation(url) {
 
 async function handleSaveSiteConfig() {
   const title = document.getElementById('site-title').value.trim();
+  const accent = document.getElementById('theme-accent').value;
+  const mode = document.getElementById('theme-mode').value;
   const statusEl = document.getElementById('identity-status');
 
   try {
     if (title) await setSiteConfig('user_post.page_title', title);
+    await setSiteConfig('theme.accent', accent);
+    await setSiteConfig('theme.mode', mode);
     await saveToIDB(pyodide, getWorkspacePath());
+
+    // Apply and cache theme locally for instant boot
+    applyTheme(accent, mode);
+    localStorage.setItem('coulomb_theme', JSON.stringify({ accent, mode }));
+
     showStatus(statusEl, 'Site settings saved!', 'success');
   } catch (e) {
     showStatus(statusEl, `Error: ${e.message}`, 'error');
@@ -420,9 +454,23 @@ async function refreshIdentity() {
       try {
         const siteConfig = await getSiteConfig();
         document.getElementById('site-title').value = siteConfig['user_post.page_title'] || '';
+        const themeAccent = siteConfig['theme.accent'] || '#e94560';
+        const themeMode = siteConfig['theme.mode'] || 'dark';
+        document.getElementById('theme-accent').value = themeAccent;
+        document.getElementById('theme-accent-hex').textContent = themeAccent;
+        document.getElementById('theme-mode').value = themeMode;
       } catch {
         // ignore
       }
+
+      // Danger zone
+      const dangerEl = document.getElementById('danger-zone-content');
+      const activeAccount = getActiveAccount();
+      dangerEl.innerHTML = `
+        <p>Permanently delete the <strong>${escapeHtml(activeAccount)}</strong> account and all its data.</p>
+        <button id="btn-delete-account" class="danger-btn">Delete "${escapeHtml(activeAccount)}" Account</button>
+      `;
+      document.getElementById('btn-delete-account').addEventListener('click', () => handleDeleteAccount(activeAccount));
     } else {
       infoSection.classList.add('hidden');
       initSection.classList.remove('hidden');
@@ -614,22 +662,13 @@ async function refreshSidebar() {
         <span class="sidebar-account-profile">${escapeHtml(name)}</span>
         ${displayName ? `<span class="sidebar-account-display">${escapeHtml(displayName)}</span>` : ''}
       </div>
-      ${!isActive ? `<button class="sidebar-account-delete" data-account="${escapeAttr(name)}" title="Delete account">✕</button>` : ''}
     </div>`;
   }).join('');
 
   container.querySelectorAll('.sidebar-account').forEach(el => {
     el.addEventListener('click', (e) => {
-      if (e.target.closest('.sidebar-account-delete')) return;
       const name = el.dataset.account;
       if (name !== active) handleSwitchAccount(name);
-    });
-  });
-
-  container.querySelectorAll('.sidebar-account-delete').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      handleDeleteAccount(btn.dataset.account);
     });
   });
 }
@@ -685,10 +724,12 @@ async function handleSwitchAccount(name) {
 }
 
 async function handleDeleteAccount(name) {
-  if (!confirm(`Delete account "${name}"? This cannot be undone.`)) return;
+  if (!confirm(`Permanently delete account "${name}"? All posts, identity, and keys will be lost.`)) return;
   try {
     await deleteAccount(name);
     await refreshSidebar();
+    showView('feed');
+    await refreshCurrentView();
   } catch (e) {
     alert(`Error: ${e.message}`);
   }

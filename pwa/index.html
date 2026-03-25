@@ -114,7 +114,25 @@
           <h3>Site Settings</h3>
           <label for="site-title">Page Title</label>
           <input type="text" id="site-title" placeholder="My Posts">
+          <div class="theme-settings">
+            <label for="theme-accent">Accent Color</label>
+            <div class="color-picker-row">
+              <input type="color" id="theme-accent" value="#e94560">
+              <span id="theme-accent-hex" class="color-hex">#e94560</span>
+            </div>
+            <label for="theme-mode">Color Scheme</label>
+            <select id="theme-mode">
+              <option value="dark">Dark</option>
+              <option value="light">Light</option>
+              <option value="auto">Auto (system)</option>
+            </select>
+          </div>
           <button id="btn-save-site-config" class="primary-btn">Save Site Settings</button>
+        </div>
+
+        <div class="danger-zone">
+          <h3>Danger Zone</h3>
+          <div id="danger-zone-content"></div>
         </div>
       </div>
       <div id="identity-init" class="hidden">
