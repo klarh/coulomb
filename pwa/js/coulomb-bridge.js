@@ -2,8 +2,18 @@ import { loadPyodideRuntime, getPyodide } from './pyodide-loader.js';
 
 const ACCOUNTS_ROOT = '/accounts';
 const DEFAULT_ACCOUNT = 'default';
+const ACCOUNTS_STORAGE_KEY = 'coulomb_accounts';
 
-let activeAccount = DEFAULT_ACCOUNT;
+function loadAccountsStorage() {
+  try { return JSON.parse(localStorage.getItem(ACCOUNTS_STORAGE_KEY)) || { active: 'default', profiles: {} }; }
+  catch { return { active: 'default', profiles: {} }; }
+}
+
+function saveAccountsStorage(data) {
+  localStorage.setItem(ACCOUNTS_STORAGE_KEY, JSON.stringify(data));
+}
+
+let activeAccount = loadAccountsStorage().active || DEFAULT_ACCOUNT;
 
 function getWorkspace() { return `${ACCOUNTS_ROOT}/${activeAccount}`; }
 function getPublic() { return `${getWorkspace()}/public`; }
@@ -32,12 +42,14 @@ export function getWorkspacePath() { return getWorkspace(); }
 
 export async function listAccounts() {
   const pyodide = getPyodide();
+  const names = new Set();
   try {
-    const entries = pyodide.FS.readdir(ACCOUNTS_ROOT).filter(e => e !== '.' && e !== '..');
-    return entries;
-  } catch {
-    return [];
-  }
+    pyodide.FS.readdir(ACCOUNTS_ROOT).filter(e => e !== '.' && e !== '..').forEach(e => names.add(e));
+  } catch {}
+  const data = loadAccountsStorage();
+  Object.keys(data.profiles).forEach(n => names.add(n));
+  names.add(activeAccount);
+  return [...names].sort();
 }
 
 export async function createAccount(name) {
@@ -47,6 +59,9 @@ export async function createAccount(name) {
     if (e.message?.includes('already exists')) throw e;
   }
   pyodide.FS.mkdir(path);
+  const data = loadAccountsStorage();
+  if (!data.profiles[name]) data.profiles[name] = {};
+  saveAccountsStorage(data);
   return name;
 }
 
@@ -54,9 +69,12 @@ export async function switchAccount(name) {
   const pyodide = getPyodide();
   const path = `${ACCOUNTS_ROOT}/${name}`;
   try { pyodide.FS.stat(path); } catch {
-    throw new Error(`Account "${name}" not found`);
+    pyodide.FS.mkdir(path);
   }
   activeAccount = name;
+  const data = loadAccountsStorage();
+  data.active = name;
+  saveAccountsStorage(data);
   await ensureWorkspace();
 }
 
@@ -68,6 +86,22 @@ path = '${ACCOUNTS_ROOT}/${name}'
 if os.path.exists(path):
     shutil.rmtree(path)
 `);
+  const data = loadAccountsStorage();
+  delete data.profiles[name];
+  saveAccountsStorage(data);
+}
+
+export function getAccountProfiles() {
+  return loadAccountsStorage().profiles;
+}
+
+export function updateAccountProfile(name, { author_id, display_name, avatar_url }) {
+  const data = loadAccountsStorage();
+  if (!data.profiles[name]) data.profiles[name] = {};
+  if (author_id !== undefined) data.profiles[name].author_id = author_id;
+  if (display_name !== undefined) data.profiles[name].display_name = display_name;
+  if (avatar_url !== undefined) data.profiles[name].avatar_url = avatar_url;
+  saveAccountsStorage(data);
 }
 
 // ── Workspace ──

@@ -25,21 +25,19 @@ body {
 
 header {
   background: var(--surface);
-  padding: 1rem;
+  padding: 0.75rem 1rem;
   border-bottom: 1px solid var(--border);
   position: sticky;
   top: 0;
   z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
 }
 
 header h1 {
   font-size: 1.2rem;
-  margin-bottom: 0.5rem;
-}
-
-nav {
-  display: flex;
-  gap: 0.5rem;
+  margin: 0;
 }
 
 .nav-btn {
@@ -187,11 +185,6 @@ textarea:focus {
 .status-msg.error { background: #3d0000; color: #ff6b6b; }
 
 /* Posts list */
-#recent-posts h2 {
-  font-size: 1rem;
-  color: var(--text-muted);
-  margin-bottom: 0.75rem;
-}
 
 .post-card {
   background: var(--surface);
@@ -291,28 +284,6 @@ label {
 #sync-status {
   font-size: 0.9rem;
   margin-bottom: 0.5rem;
-}
-
-/* Preview */
-.preview-controls {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  margin-bottom: 1rem;
-}
-
-#preview-container {
-  background: var(--surface);
-  border-radius: var(--radius);
-  overflow: hidden;
-}
-
-#preview-frame {
-  width: 100%;
-  min-height: 70vh;
-  border: none;
-  background: white;
-  border-radius: var(--radius);
 }
 
 /* Reply context */
@@ -663,4 +634,220 @@ label {
 .feed-reply-btn:hover {
   background: var(--surface-2);
   color: var(--accent);
+}
+
+/* Sidebar (CSS-only toggle) */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}
+
+.sidebar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 280px;
+  height: 100vh;
+  background: var(--surface);
+  z-index: 100;
+  transform: translateX(-100%);
+  transition: transform 0.3s ease;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  padding: 1rem;
+  border-right: 1px solid var(--border);
+}
+
+#sidebar-toggle:checked ~ .sidebar {
+  transform: translateX(0);
+}
+
+.sidebar-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 99;
+  display: none;
+  cursor: pointer;
+}
+
+#sidebar-toggle:checked ~ .sidebar-overlay {
+  display: block;
+}
+
+.sidebar-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.sidebar-header h2 {
+  font-size: 1rem;
+  margin: 0;
+}
+
+.sidebar-close {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 1.2rem;
+  cursor: pointer;
+  padding: 0.25rem;
+}
+
+.sidebar-close:hover {
+  color: var(--accent);
+}
+
+.hamburger-btn {
+  background: none;
+  border: none;
+  color: var(--text);
+  font-size: 1.5rem;
+  cursor: pointer;
+  padding: 0.25rem 0.5rem;
+  line-height: 1;
+}
+
+.hamburger-btn:hover {
+  color: var(--accent);
+}
+
+/* Sidebar account cards */
+.sidebar-account {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.5rem;
+  border-radius: var(--radius);
+  cursor: pointer;
+  margin-bottom: 0.3rem;
+  transition: background 0.15s;
+}
+
+.sidebar-account:hover {
+  background: var(--surface-2);
+}
+
+.sidebar-account.active {
+  background: var(--surface-2);
+  border-left: 3px solid var(--accent);
+}
+
+.sidebar-account-avatar {
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+}
+
+.sidebar-account-avatar svg {
+  display: block;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+}
+
+.sidebar-account-avatar img {
+  display: block;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.sidebar-account-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.sidebar-account-profile {
+  font-size: 0.85rem;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-account-display {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-account-delete {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 0.9rem;
+  padding: 0.25rem;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.sidebar-account:hover .sidebar-account-delete {
+  opacity: 1;
+}
+
+.sidebar-account-delete:hover {
+  color: var(--accent);
+}
+
+/* Sidebar create account row */
+.sidebar-create {
+  display: flex;
+  gap: 0.4rem;
+  margin-top: 0.5rem;
+}
+
+.sidebar-create input {
+  flex: 1;
+  font-size: 0.85rem;
+  padding: 0.35rem 0.5rem;
+}
+
+.sidebar-create-btn {
+  background: var(--surface-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-size: 1rem;
+  padding: 0.25rem 0.6rem;
+  line-height: 1;
+}
+
+.sidebar-create-btn:hover {
+  background: var(--border);
+}
+
+.sidebar-divider {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 1rem 0;
+}
+
+/* Sidebar navigation */
+.sidebar-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin-top: auto;
+}
+
+.sidebar-nav .nav-btn {
+  text-align: left;
+  width: 100%;
+  padding: 0.5rem 0.75rem;
 }

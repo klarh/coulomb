@@ -10,13 +10,31 @@
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
-  <header>
-    <h1>⚡ Coulomb</h1>
-    <nav>
+  <!-- Sidebar toggle (CSS-only mechanism) -->
+  <input type="checkbox" id="sidebar-toggle" class="sr-only">
+
+  <aside class="sidebar">
+    <div class="sidebar-header">
+      <h2>Accounts</h2>
+      <label for="sidebar-toggle" class="sidebar-close" aria-label="Close menu">✕</label>
+    </div>
+    <div id="sidebar-accounts"></div>
+    <div class="sidebar-create">
+      <input type="text" id="sidebar-new-account" placeholder="New account name">
+      <button id="btn-sidebar-create-account" class="sidebar-create-btn" title="Create account">+</button>
+    </div>
+    <hr class="sidebar-divider">
+    <nav class="sidebar-nav">
       <button id="nav-feed" class="nav-btn active">Feed</button>
       <button id="nav-identity" class="nav-btn">Identity</button>
       <button id="nav-sync" class="nav-btn">Sync</button>
     </nav>
+  </aside>
+  <label for="sidebar-toggle" class="sidebar-overlay"></label>
+
+  <header>
+    <label for="sidebar-toggle" class="hamburger-btn" aria-label="Open menu">☰</label>
+    <h1>⚡ Coulomb</h1>
   </header>
 
   <main>
@@ -146,17 +164,6 @@
         <div id="sync-status"></div>
         <div id="pending-changes"></div>
         <button id="btn-publish" class="primary-btn" disabled>Publish Changes</button>
-      </div>
-
-      <div class="identity-section">
-        <h2>Accounts</h2>
-        <p class="help-text">Each account has its own identity, posts, and sync target.</p>
-        <div id="account-current"></div>
-        <div id="accounts-list"></div>
-        <div class="config-add-row">
-          <input type="text" id="account-new-name" placeholder="Account name">
-          <button id="btn-create-account" class="secondary-btn">Create</button>
-        </div>
       </div>
 
       <div class="identity-section">

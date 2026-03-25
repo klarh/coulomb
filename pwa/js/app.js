@@ -7,10 +7,12 @@ import {
   createPost, listRecentPosts, getPendingFiles,
   readWorkspaceFile, renderSite,
   getSiteConfig, setSiteConfig, generateQRCodeSVG,
-  getActiveAccount, getWorkspacePath, listAccounts, createAccount, switchAccount, deleteAccount
+  getActiveAccount, getWorkspacePath, listAccounts, createAccount, switchAccount, deleteAccount,
+  getAccountProfiles, updateAccountProfile
 } from './coulomb-bridge.js';
 import { GitHubPagesBackend } from './storage/github.js';
 import { renderFeed } from './feed-renderer.js';
+import { generateIdenticonSVG } from './identicon.js';
 
 // ── State ──
 let pyodide = null;
@@ -75,6 +77,7 @@ for item in os.listdir(old):
     // Check for key import via URL fragment
     await checkKeyImport();
 
+    await refreshSidebar();
     await refreshCurrentView();
   } catch (e) {
     status.textContent = `Error: ${e.message}`;
@@ -95,13 +98,13 @@ function showView(name) {
 function bindEvents() {
   // Navigation
   document.getElementById('nav-feed').addEventListener('click', async () => {
-    showView('feed'); await refreshFeed();
+    closeSidebar(); showView('feed'); await refreshFeed();
   });
   document.getElementById('nav-identity').addEventListener('click', async () => {
-    showView('identity'); await refreshIdentity();
+    closeSidebar(); showView('identity'); await refreshIdentity();
   });
   document.getElementById('nav-sync').addEventListener('click', async () => {
-    showView('sync'); await refreshSync();
+    closeSidebar(); showView('sync'); await refreshSync();
   });
 
   // Feed / Compose
@@ -122,7 +125,7 @@ function bindEvents() {
   document.getElementById('btn-publish').addEventListener('click', handlePublish);
 
   // Accounts
-  document.getElementById('btn-create-account').addEventListener('click', handleCreateAccount);
+  document.getElementById('btn-sidebar-create-account').addEventListener('click', handleCreateAccount);
 
   // Data portability
   document.getElementById('btn-export').addEventListener('click', handleExport);
@@ -151,7 +154,8 @@ async function handlePost() {
   try {
     const initialized = await isInitialized();
     if (!initialized) {
-      showStatus(statusEl, 'No identity found. Go to Identity tab to initialize.', 'error');
+      showStatus(statusEl, 'No identity found — redirecting to Identity tab.', 'error');
+      showView('identity'); await refreshIdentity();
       return;
     }
 
@@ -221,6 +225,7 @@ async function handleInit() {
     const keyId = await initialize();
     await saveToIDB(pyodide, getWorkspacePath());
     showStatus(statusEl, `Identity created! Key: ${keyId.slice(0, 16)}…`, 'success');
+    await refreshSidebar();
     await refreshIdentity();
   } catch (e) {
     showStatus(statusEl, `Error: ${e.message}`, 'error');
@@ -244,6 +249,15 @@ async function handleSaveProfile() {
     await setIdentityConfig(pairs);
     await saveToIDB(pyodide, getWorkspacePath());
     showStatus(statusEl, 'Profile updated!', 'success');
+    try {
+      const info = await getIdentityInfo();
+      if (info) updateAccountProfile(getActiveAccount(), {
+        author_id: info.id,
+        display_name: info.display_name,
+        avatar_url: info.avatar_url
+      });
+      await refreshSidebar();
+    } catch {}
     await refreshIdentity();
   } catch (e) {
     showStatus(statusEl, `Error: ${e.message}`, 'error');
@@ -555,38 +569,69 @@ async function refreshSync() {
   } catch (e) {
     console.error('Failed to check pending files:', e);
   }
+}
 
-  // Accounts
+// ── Sidebar ──
+
+function closeSidebar() {
+  document.getElementById('sidebar-toggle').checked = false;
+}
+
+async function refreshSidebar() {
+  const container = document.getElementById('sidebar-accounts');
+  const accounts = await listAccounts();
+  const active = getActiveAccount();
+  const profiles = getAccountProfiles();
+
+  let liveInfo = null;
   try {
-    const accounts = await listAccounts();
-    const active = getActiveAccount();
-    document.getElementById('account-current').innerHTML =
-      `<p>Active: <strong>${escapeHtml(active)}</strong></p>`;
-
-    const listEl = document.getElementById('accounts-list');
-    if (accounts.length > 1) {
-      listEl.innerHTML = accounts.map(name => {
-        const isActive = name === active;
-        return `<div class="account-row ${isActive ? 'active' : ''}">
-          <span>${escapeHtml(name)}</span>
-          ${isActive ? '<em>(active)</em>' : `
-            <button class="secondary-btn switch-account-btn" data-account="${escapeAttr(name)}">Switch</button>
-            <button class="remove-btn delete-account-btn" data-account="${escapeAttr(name)}">✕</button>
-          `}
-        </div>`;
-      }).join('');
-      listEl.querySelectorAll('.switch-account-btn').forEach(btn => {
-        btn.addEventListener('click', () => handleSwitchAccount(btn.dataset.account));
-      });
-      listEl.querySelectorAll('.delete-account-btn').forEach(btn => {
-        btn.addEventListener('click', () => handleDeleteAccount(btn.dataset.account));
-      });
-    } else {
-      listEl.innerHTML = '';
+    const info = await getIdentityInfo();
+    if (info) {
+      liveInfo = { author_id: info.id, display_name: info.display_name, avatar_url: info.avatar_url };
+      updateAccountProfile(active, liveInfo);
     }
-  } catch (e) {
-    console.error('Failed to list accounts:', e);
-  }
+  } catch {}
+
+  container.innerHTML = accounts.map(name => {
+    const isActive = name === active;
+    const profile = isActive && liveInfo ? liveInfo : (profiles[name] || {});
+    const authorId = profile.author_id || '';
+    const displayName = profile.display_name || '';
+    const avatarUrl = profile.avatar_url || '';
+
+    let avatarHtml;
+    if (avatarUrl) {
+      avatarHtml = `<img src="${escapeHtml(avatarUrl)}" alt="">`;
+    } else if (authorId) {
+      avatarHtml = generateIdenticonSVG(authorId, 40);
+    } else {
+      avatarHtml = `<svg viewBox="0 0 40 40" width="40" height="40"><circle cx="20" cy="20" r="20" fill="var(--surface-2)"/><text x="20" y="24" text-anchor="middle" fill="var(--text-muted)" font-size="14">${escapeHtml(name[0].toUpperCase())}</text></svg>`;
+    }
+
+    return `<div class="sidebar-account ${isActive ? 'active' : ''}" data-account="${escapeAttr(name)}">
+      <div class="sidebar-account-avatar">${avatarHtml}</div>
+      <div class="sidebar-account-info">
+        <span class="sidebar-account-profile">${escapeHtml(name)}</span>
+        ${displayName ? `<span class="sidebar-account-display">${escapeHtml(displayName)}</span>` : ''}
+      </div>
+      ${!isActive ? `<button class="sidebar-account-delete" data-account="${escapeAttr(name)}" title="Delete account">✕</button>` : ''}
+    </div>`;
+  }).join('');
+
+  container.querySelectorAll('.sidebar-account').forEach(el => {
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('.sidebar-account-delete')) return;
+      const name = el.dataset.account;
+      if (name !== active) handleSwitchAccount(name);
+    });
+  });
+
+  container.querySelectorAll('.sidebar-account-delete').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      handleDeleteAccount(btn.dataset.account);
+    });
+  });
 }
 
 async function refreshCurrentView() {
@@ -600,46 +645,52 @@ async function refreshCurrentView() {
 // ── Accounts ──
 
 async function handleCreateAccount() {
-  const nameEl = document.getElementById('account-new-name');
+  const nameEl = document.getElementById('sidebar-new-account');
   const name = nameEl.value.trim().replace(/[^a-zA-Z0-9_-]/g, '');
   if (!name) return;
 
-  const statusEl = document.getElementById('data-status');
   try {
     await createAccount(name);
     await switchAccount(name);
     await restoreFromIDB(getPyodide(), getWorkspacePath());
     nameEl.value = '';
-    showStatus(statusEl, `Switched to account "${name}"`, 'success');
-    await refreshSync();
-    await refreshCurrentView();
+    closeSidebar();
+    await refreshSidebar();
+    // New account needs identity init — go to Identity tab
+    showView('identity');
+    await refreshIdentity();
   } catch (e) {
-    showStatus(statusEl, `Error: ${e.message}`, 'error');
+    alert(`Error creating account: ${e.message}`);
   }
 }
 
 async function handleSwitchAccount(name) {
-  const statusEl = document.getElementById('data-status');
   try {
+    await saveToIDB(pyodide, getWorkspacePath());
     await switchAccount(name);
     await restoreFromIDB(getPyodide(), getWorkspacePath());
-    showStatus(statusEl, `Switched to "${name}"`, 'success');
-    await refreshSync();
-    await refreshCurrentView();
+    closeSidebar();
+    await refreshSidebar();
+    // If the account has no identity, go to Identity tab to initialize
+    const initialized = await isInitialized();
+    if (!initialized) {
+      showView('identity');
+      await refreshIdentity();
+    } else {
+      await refreshCurrentView();
+    }
   } catch (e) {
-    showStatus(statusEl, `Error: ${e.message}`, 'error');
+    alert(`Error switching account: ${e.message}`);
   }
 }
 
 async function handleDeleteAccount(name) {
   if (!confirm(`Delete account "${name}"? This cannot be undone.`)) return;
-  const statusEl = document.getElementById('data-status');
   try {
     await deleteAccount(name);
-    showStatus(statusEl, `Account "${name}" deleted`, 'success');
-    await refreshSync();
+    await refreshSidebar();
   } catch (e) {
-    showStatus(statusEl, `Error: ${e.message}`, 'error');
+    alert(`Error: ${e.message}`);
   }
 }
 
