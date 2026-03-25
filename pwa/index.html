@@ -178,6 +178,20 @@
       </div>
 
       <div class="sync-actions">
+        <h2>Sources</h2>
+        <p class="help-text">Follow other Coulomb sites to pull their posts into your feed.</p>
+        <div class="source-add">
+          <input type="text" id="source-url" placeholder="https://example.com/public">
+          <button id="btn-add-source" class="secondary-btn">Add</button>
+        </div>
+        <div id="source-list"></div>
+        <div class="source-actions">
+          <button id="btn-pull-all" class="primary-btn" disabled>Pull All Sources</button>
+        </div>
+        <div id="pull-status" class="status-msg hidden"></div>
+      </div>
+
+      <div class="sync-actions">
         <h2>Publish</h2>
         <div id="sync-status"></div>
         <div id="pending-changes"></div>

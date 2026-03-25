@@ -2,7 +2,8 @@ const PYODIDE_VERSION = '0.27.4';
 const PYODIDE_CDN = `https://cdn.jsdelivr.net/pyodide/v${PYODIDE_VERSION}/full/`;
 
 let pyodideInstance = null;
-let _deferredPackagesLoaded = false;
+let _sqlite3Loaded = false;
+let _jinja2Loaded = false;
 
 export async function loadPyodideRuntime(onProgress) {
   if (pyodideInstance) return pyodideInstance;
@@ -50,17 +51,26 @@ export async function loadPyodideRuntime(onProgress) {
 }
 
 /**
+ * Ensure sqlite3 is loaded (needed for pull cache and render cache).
+ */
+export async function ensureSqlite3() {
+  if (_sqlite3Loaded) return;
+  await pyodideInstance.loadPackage('sqlite3');
+  _sqlite3Loaded = true;
+}
+
+/**
  * Load packages only needed for rendering (jinja2, sqlite3).
  * Called lazily on first renderSite() to keep boot fast.
  */
 export async function ensureRenderPackages() {
-  if (_deferredPackagesLoaded) return;
-  const micropip = pyodideInstance.pyimport('micropip');
-  await Promise.all([
-    micropip.install('jinja2'),
-    pyodideInstance.loadPackage('sqlite3'),
-  ]);
-  _deferredPackagesLoaded = true;
+  const loads = [];
+  if (!_jinja2Loaded) {
+    const micropip = pyodideInstance.pyimport('micropip');
+    loads.push(micropip.install('jinja2').then(() => { _jinja2Loaded = true; }));
+  }
+  if (!_sqlite3Loaded) loads.push(ensureSqlite3());
+  if (loads.length) await Promise.all(loads);
 }
 
 async function installNaclShim(pyodide) {
@@ -261,6 +271,7 @@ async function loadCoulombSource(pyodide) {
     'post.py',
     'create_key.py',
     'identity.py',
+    'pull.py',
     'render.py',
     'rebuild_index.py',
     'verify.py',

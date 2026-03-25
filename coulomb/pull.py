@@ -1,9 +1,7 @@
 import datetime
 import os
-import shutil
 import sqlite3
 from posixpath import join as urljoin
-import urllib.request
 
 import cbor2
 
@@ -79,12 +77,26 @@ class Queries:
     set_remap = 'INSERT INTO remaps VALUES (?, ?, ?)'
 
 
+def _url_fetcher(location):
+    import urllib.request
+    with urllib.request.urlopen(location) as f:
+        return f.read()
+
+
+def _local_fetcher(location):
+    with open(location, 'rb') as f:
+        return f.read()
+
+
 class PullCache:
-    def __init__(self, root, filename, hash_name):
+    def __init__(self, root, filename, hash_name, fetcher=None, change_log=None):
         self.root = root
         self.filename = filename
         self.hash_name = hash_name
         self.connection = sqlite3.connect(filename)
+        self._fetcher = fetcher or _url_fetcher
+        self.change_log = change_log
+        self.imported_count = 0
 
         self.init()
 
@@ -92,22 +104,23 @@ class PullCache:
         with self.connection as conn:
             conn.executescript(Queries.init)
 
-    @staticmethod
-    def get(location):
-        with urllib.request.urlopen(location) as f:
-            return f.read()
+    def get(self, location):
+        return self._fetcher(location)
+
+    def _log_change(self, relpath):
+        if self.change_log:
+            self.change_log.write(relpath + '\n')
 
     def stale_check(self, location):
         location_id = None
         with self.connection as conn:
-            query = conn.execute(Queries.insert_location, (location,))
-            location_id = query.lastrowid
+            conn.execute(Queries.insert_location, (location,))
             for (location_id,) in conn.execute(Queries.lookup_location, (location,)):
                 pass
 
-        return self.stale_check_(location, location_id, '.')
+        self._walk(location, location_id, '.')
 
-    def stale_check_(self, location, remote_id, remote_subdir):
+    def _walk(self, location, remote_id, remote_subdir):
         recurse = True
         index_bytes = self.get(urljoin(location, remote_subdir, 'index.cbor'))
         index = cbor2.loads(index_bytes)
@@ -118,38 +131,60 @@ class PullCache:
             ):
                 recurse = index['self_hashes'][self.hash_name] != last_hash
 
-        if recurse:
-            for filename, hashval in index['child_hashes'][self.hash_name].items():
-                bits = filename.split('.')
-                if len(bits) < 3 or not filename.endswith('cbor'):
-                    continue
-                entry_type, entry_id = bits[:2]
-                if entry_type not in ('post', 'reply'):
-                    continue
+        if not recurse:
+            return
+
+        # Import post/reply entries and identity files from this directory
+        for filename, hashval in index['child_hashes'][self.hash_name].items():
+            bits = filename.split('.')
+            if not filename.endswith('cbor') or len(bits) < 3:
+                continue
+
+            entry_type = bits[0]
+            entry_id = bits[1]
+
+            if entry_type in ('post', 'reply'):
                 sub_filename = urljoin(remote_subdir, filename)
-                self.import_(
+                self._import_post(
                     location, remote_id, sub_filename, hashval, entry_type, entry_id
                 )
+            elif entry_type == 'identity':
+                sub_filename = urljoin(remote_subdir, filename)
+                self._import_identity(
+                    location, remote_id, sub_filename, hashval, remote_subdir
+                )
 
-            for subdir in index['dirnames']:
-                if subdir == '.':
-                    continue
-                self.stale_check_(location, remote_id, urljoin(remote_subdir, subdir))
+        # Also import latest.cbor in identity directories
+        if 'latest.cbor' in index.get('filenames', []):
+            latest_path = urljoin(remote_subdir, 'latest.cbor')
+            latest_hash = index['child_hashes'][self.hash_name].get('latest.cbor')
+            if latest_hash:
+                self._import_identity(
+                    location, remote_id, latest_path, latest_hash, remote_subdir
+                )
 
-            qval = (
-                remote_id,
-                remote_subdir,
-                index['self_hashes'][self.hash_name],
-                self.hash_name,
-            )
-            with self.connection as conn:
-                conn.execute(Queries.insert_hash, qval)
+        # Recurse into subdirectories
+        for subdir in index.get('dirnames', []):
+            if subdir == '.':
+                continue
+            self._walk(location, remote_id, urljoin(remote_subdir, subdir))
 
-    def import_(self, location, remote_id, filename, hashval, entry_type, entry_id):
+        # Update cached hash for this directory
+        qval = (
+            remote_id,
+            remote_subdir,
+            index['self_hashes'][self.hash_name],
+            self.hash_name,
+        )
         with self.connection as conn:
-            qval = (remote_id, filename, self.hash_name)
+            conn.execute(Queries.insert_hash, qval)
+
+    def _import_post(self, location, remote_id, filename, hashval, entry_type, entry_id):
+        with self.connection as conn:
             last_hash = None
-            for (last_hash,) in conn.execute(Queries.get_hash, qval):
+            for (last_hash,) in conn.execute(
+                Queries.get_hash, (remote_id, filename, self.hash_name)
+            ):
                 pass
 
             if last_hash == hashval:
@@ -160,11 +195,16 @@ class PullCache:
                 pass
 
             if not dest_path:
-                dest_path = self.get_remap_(
+                dest_path = self._remap_post(
                     conn, remote_id, location, filename, entry_type, entry_id
                 )
 
-    def get_remap_(self, conn, remote_id, location, filename, entry_type, entry_id):
+            # Update hash after successful import
+            conn.execute(Queries.insert_hash, (
+                remote_id, filename, hashval, self.hash_name
+            ))
+
+    def _remap_post(self, conn, remote_id, location, filename, entry_type, entry_id):
         archive_kwargs = dict(prefix='posts')
 
         entry_bytes = self.get(urljoin(location, filename))
@@ -198,21 +238,63 @@ class PullCache:
 
             bump += 1
 
-        qval = (remote_id, filename, dest_path.path)
-        conn.execute(Queries.set_remap, qval)
+        conn.execute(Queries.set_remap, (remote_id, filename, dest_path.path))
 
+        os.makedirs(os.path.dirname(full_dest), exist_ok=True)
         with open(full_dest, 'wb') as f:
             f.write(entry_bytes)
+        self._log_change(dest_path.path)
+        self.imported_count += 1
+        return dest_path.path
+
+    def _import_identity(self, location, remote_id, filename, hashval, remote_subdir):
+        with self.connection as conn:
+            last_hash = None
+            for (last_hash,) in conn.execute(
+                Queries.get_hash, (remote_id, filename, self.hash_name)
+            ):
+                pass
+
+            if last_hash == hashval:
+                return
+
+        entry_bytes = self.get(urljoin(location, filename))
+
+        # Preserve the identity directory structure: identity/<key_id>/...
+        dest_path = filename
+        full_dest = os.path.join(self.root, dest_path)
+
+        os.makedirs(os.path.dirname(full_dest), exist_ok=True)
+        with open(full_dest, 'wb') as f:
+            f.write(entry_bytes)
+        self._log_change(dest_path)
+        self.imported_count += 1
+
+        with self.connection as conn:
+            conn.execute(Queries.insert_hash, (
+                remote_id, filename, hashval, self.hash_name
+            ))
 
 
-def main(root, cache_file, sources, hash_name, change_log):
-    cache = PullCache(root, cache_file, hash_name)
+def main(root, cache_file, sources, hash_name, change_log, fetcher=None):
+    import contextlib
 
-    for src in sources:
-        cache.stale_check(src)
+    change_log_fh = None
+    if isinstance(change_log, str):
+        change_log_fh = open(change_log, 'a')
+    elif change_log is not None:
+        change_log_fh = change_log
 
+    cache = PullCache(
+        root, cache_file, hash_name,
+        fetcher=fetcher, change_log=change_log_fh
+    )
 
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
-    add_parser_args(parser)
-    main(**vars(parser.parse_args()))
+    try:
+        for src in sources:
+            cache.stale_check(src)
+    finally:
+        if isinstance(change_log, str) and change_log_fh:
+            change_log_fh.close()
+
+    return cache.imported_count

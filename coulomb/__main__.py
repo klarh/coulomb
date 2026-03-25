@@ -6,6 +6,7 @@ from . import create_key
 from . import identity
 from . import init
 from . import post
+from . import pull
 from . import rebuild_index
 from . import render
 from . import verify

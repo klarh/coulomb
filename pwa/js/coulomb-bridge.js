@@ -1,4 +1,4 @@
-import { loadPyodideRuntime, getPyodide, ensureRenderPackages } from './pyodide-loader.js';
+import { loadPyodideRuntime, getPyodide, ensureRenderPackages, ensureSqlite3 } from './pyodide-loader.js';
 
 const ACCOUNTS_ROOT = '/accounts';
 const DEFAULT_ACCOUNT = 'default';
@@ -608,6 +608,112 @@ export function getRenderedFile(relPath) {
   } catch {
     return null;
   }
+}
+
+// ── Pull Sources ──
+
+const SOURCES_STORAGE_KEY = 'coulomb_pull_sources';
+
+function loadSourcesStorage() {
+  try {
+    return JSON.parse(localStorage.getItem(`${SOURCES_STORAGE_KEY}_${activeAccount}`) || '[]');
+  } catch { return []; }
+}
+
+function saveSourcesStorage(sources) {
+  localStorage.setItem(`${SOURCES_STORAGE_KEY}_${activeAccount}`, JSON.stringify(sources));
+}
+
+export function getPullSources() {
+  return loadSourcesStorage();
+}
+
+export function addPullSource(url, label) {
+  const sources = loadSourcesStorage();
+  const normalized = url.replace(/\/+$/, '');
+  if (sources.some(s => s.url === normalized)) return sources;
+  sources.push({ url: normalized, label: label || normalized, last_pulled: null });
+  saveSourcesStorage(sources);
+  return sources;
+}
+
+export function removePullSource(url) {
+  const sources = loadSourcesStorage().filter(s => s.url !== url);
+  saveSourcesStorage(sources);
+  return sources;
+}
+
+export async function pullFromSource(sourceUrl) {
+  await ensureSqlite3();
+  const public_ = getPublic();
+  const cacheFile = `${getWorkspace()}/pull_cache.db`;
+  const changelog = getChangelog();
+
+  // In Pyodide, urllib doesn't work — use pyfetch as fetcher
+  const result = await runPy(`
+import json
+from pyodide.http import pyfetch
+
+async def _pyodide_fetcher(url):
+    resp = await pyfetch(url)
+    return (await resp.bytes()).to_py()
+
+from coulomb.pull import main as pull_main, PullCache
+# Wrap to pass async fetcher — PullCache.get needs to be sync,
+# so we pre-fetch via JS fetch and cache results
+import js
+from pyodide.ffi import to_js
+
+class _BrowserPullCache(PullCache):
+    def get(self, location):
+        from pyodide.http import open_url
+        # open_url is synchronous and returns text; we need bytes
+        # Use XMLHttpRequest synchronously for binary
+        from js import XMLHttpRequest
+        xhr = XMLHttpRequest.new()
+        xhr.open('GET', location, False)
+        xhr.responseType = 'arraybuffer'
+        xhr.send()
+        if xhr.status != 200:
+            raise IOError(f'HTTP {xhr.status} fetching {location}')
+        return bytes(xhr.response.to_py())
+
+_cache = _BrowserPullCache(
+    root=${JSON.stringify(public_)},
+    filename=${JSON.stringify(cacheFile)},
+    hash_name='sha512',
+    change_log=open(${JSON.stringify(changelog)}, 'a'),
+)
+for _src in [${JSON.stringify(sourceUrl)}]:
+    _cache.stale_check(_src)
+_cache.change_log.close()
+_bridge_out = str(_cache.imported_count)
+`);
+
+  const count = parseInt(result, 10) || 0;
+
+  // Update last_pulled timestamp
+  const sources = loadSourcesStorage();
+  const src = sources.find(s => s.url === sourceUrl);
+  if (src) {
+    src.last_pulled = new Date().toISOString();
+    saveSourcesStorage(sources);
+  }
+
+  return count;
+}
+
+export async function pullAllSources() {
+  const sources = loadSourcesStorage();
+  let total = 0;
+  for (const src of sources) {
+    try {
+      total += await pullFromSource(src.url);
+    } catch (e) {
+      console.error(`Pull failed for ${src.url}:`, e);
+    }
+  }
+  return total;
 }
 
 export function listRenderedPages() {

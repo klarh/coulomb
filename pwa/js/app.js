@@ -8,7 +8,8 @@ import {
   readWorkspaceFile, renderSite,
   getSiteConfig, setSiteConfig, generateQRCodeSVG,
   getActiveAccount, getWorkspacePath, listAccounts, createAccount, switchAccount, deleteAccount,
-  getAccountProfiles, updateAccountProfile
+  getAccountProfiles, updateAccountProfile,
+  getPullSources, addPullSource, removePullSource, pullFromSource, pullAllSources
 } from './coulomb-bridge.js';
 import { GitHubPagesBackend } from './storage/github.js';
 import { renderFeed } from './feed-renderer.js';
@@ -168,6 +169,10 @@ function bindEvents() {
   document.getElementById('btn-request-key').addEventListener('click', handleRequestKey);
   document.getElementById('btn-provision-send').addEventListener('click', handleProvisionSend);
   document.getElementById('btn-provision-receive').addEventListener('click', handleProvisionReceive);
+
+  // Pull sources
+  document.getElementById('btn-add-source').addEventListener('click', handleAddSource);
+  document.getElementById('btn-pull-all').addEventListener('click', handlePullAll);
 
   // Theme color picker live preview
   document.getElementById('theme-accent').addEventListener('input', (e) => {
@@ -630,6 +635,94 @@ async function refreshSync() {
     }
   } catch (e) {
     console.error('Failed to check pending files:', e);
+  }
+
+  // Pull sources
+  renderSources();
+}
+
+function renderSources() {
+  const sources = getPullSources();
+  const listEl = document.getElementById('source-list');
+  const pullAllBtn = document.getElementById('btn-pull-all');
+
+  pullAllBtn.disabled = sources.length === 0;
+
+  if (sources.length === 0) {
+    listEl.innerHTML = '<p class="help-text">No sources added yet.</p>';
+    return;
+  }
+
+  listEl.innerHTML = sources.map(src => {
+    const lastPulled = src.last_pulled
+      ? new Date(src.last_pulled).toLocaleString()
+      : 'never';
+    return `<div class="source-item" data-url="${escapeAttr(src.url)}">
+      <div class="source-info">
+        <span class="source-label">${escapeHtml(src.label)}</span>
+        <span class="source-meta">Last pulled: ${lastPulled}</span>
+      </div>
+      <div class="source-btns">
+        <button class="secondary-btn source-pull-btn" title="Pull">↓</button>
+        <button class="secondary-btn source-rm-btn" title="Remove">✕</button>
+      </div>
+    </div>`;
+  }).join('');
+
+  listEl.querySelectorAll('.source-pull-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const url = btn.closest('.source-item').dataset.url;
+      await handlePullOne(url);
+    });
+  });
+
+  listEl.querySelectorAll('.source-rm-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const url = btn.closest('.source-item').dataset.url;
+      removePullSource(url);
+      renderSources();
+    });
+  });
+}
+
+function handleAddSource() {
+  const input = document.getElementById('source-url');
+  const url = input.value.trim();
+  if (!url) return;
+  addPullSource(url);
+  input.value = '';
+  renderSources();
+}
+
+async function handlePullOne(url) {
+  const statusEl = document.getElementById('pull-status');
+  statusEl.textContent = `Pulling from ${url}…`;
+  statusEl.classList.remove('hidden');
+  try {
+    const count = await pullFromSource(url);
+    statusEl.textContent = count > 0 ? `Pulled ${count} new item(s)` : 'Already up to date';
+    await saveToIDB(pyodide, getWorkspacePath());
+    renderSources();
+  } catch (e) {
+    statusEl.textContent = `Error: ${e.message}`;
+  }
+}
+
+async function handlePullAll() {
+  const statusEl = document.getElementById('pull-status');
+  const btn = document.getElementById('btn-pull-all');
+  statusEl.textContent = 'Pulling all sources…';
+  statusEl.classList.remove('hidden');
+  btn.disabled = true;
+  try {
+    const count = await pullAllSources();
+    statusEl.textContent = count > 0 ? `Pulled ${count} new item(s) total` : 'All sources up to date';
+    await saveToIDB(pyodide, getWorkspacePath());
+    renderSources();
+  } catch (e) {
+    statusEl.textContent = `Error: ${e.message}`;
+  } finally {
+    btn.disabled = false;
   }
 }
 
