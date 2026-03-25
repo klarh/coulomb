@@ -5,16 +5,17 @@ import {
   setDisplayName, setAvatarUrl, setIdentityConfig,
   addLocation, removeLocation,
   createPost, listRecentPosts, getPendingFiles,
-  readWorkspaceFile, renderSite, getRenderedPage, getRenderedFile, listRenderedPages,
+  readWorkspaceFile, renderSite,
   getSiteConfig, setSiteConfig, generateQRCodeSVG,
   getActiveAccount, getWorkspacePath, listAccounts, createAccount, switchAccount, deleteAccount
 } from './coulomb-bridge.js';
 import { GitHubPagesBackend } from './storage/github.js';
+import { renderFeed } from './feed-renderer.js';
 
 // ── State ──
 let pyodide = null;
 let backend = new GitHubPagesBackend();
-let currentView = 'compose';
+let currentView = 'feed';
 let replyTarget = null; // { path, text, author_id }
 
 // ── Service Worker Registration ──
@@ -68,7 +69,7 @@ for item in os.listdir(old):
     backend.tryRestore();
 
     document.getElementById('loading-screen').classList.add('hidden');
-    showView('compose');
+    showView('feed');
     bindEvents();
 
     // Check for key import via URL fragment
@@ -93,11 +94,8 @@ function showView(name) {
 // ── Event Binding ──
 function bindEvents() {
   // Navigation
-  document.getElementById('nav-compose').addEventListener('click', async () => {
-    showView('compose'); await refreshCompose();
-  });
-  document.getElementById('nav-preview').addEventListener('click', async () => {
-    showView('preview'); await refreshPreview();
+  document.getElementById('nav-feed').addEventListener('click', async () => {
+    showView('feed'); await refreshFeed();
   });
   document.getElementById('nav-identity').addEventListener('click', async () => {
     showView('identity'); await refreshIdentity();
@@ -106,17 +104,10 @@ function bindEvents() {
     showView('sync'); await refreshSync();
   });
 
-  // Compose
+  // Feed / Compose
   document.getElementById('btn-post').addEventListener('click', handlePost);
   document.getElementById('post-files').addEventListener('change', handleFileSelect);
   document.getElementById('btn-cancel-reply').addEventListener('click', cancelReply);
-
-  // Preview
-  document.getElementById('btn-render').addEventListener('click', handleRender);
-  document.getElementById('btn-preview-back').addEventListener('click', () => {
-    previewPath = 'pages/latest.html';
-    refreshPreview();
-  });
 
   // Identity
   document.getElementById('btn-init').addEventListener('click', handleInit);
@@ -144,7 +135,7 @@ function bindEvents() {
   document.getElementById('btn-provision-receive').addEventListener('click', handleProvisionReceive);
 }
 
-// ── Compose ──
+// ── Feed ──
 async function handlePost() {
   const textEl = document.getElementById('post-text');
   const text = textEl.value.trim();
@@ -175,7 +166,7 @@ async function handlePost() {
     document.getElementById('attached-files').textContent = '';
     cancelReply();
     showStatus(statusEl, 'Post created!', 'success');
-    await refreshCompose();
+    await refreshFeed();
   } catch (e) {
     showStatus(statusEl, `Error: ${e.message}`, 'error');
   } finally {
@@ -206,130 +197,15 @@ function cancelReply() {
   document.getElementById('reply-context').classList.add('hidden');
 }
 
-async function refreshCompose() {
+async function refreshFeed() {
   try {
-    const posts = await listRecentPosts(10);
-    const listEl = document.getElementById('posts-list');
-    if (posts.length === 0) {
-      listEl.innerHTML = '<p style="color: var(--text-muted)">No posts yet</p>';
-      return;
-    }
-    listEl.innerHTML = posts.map(p => {
-      const replyInfo = p.reply_to
-        ? `<div class="post-reply-badge">↩ Reply to ${p.reply_to.author.slice(0, 8)}…</div>`
-        : '';
-      const fileInfo = p.file_count > 0
-        ? `<div class="post-files-badge">📎 ${p.file_count} file(s): ${p.files.join(', ')}</div>`
-        : '';
-      return `
-        <div class="post-card">
-          <div class="post-time">${p.time || 'Unknown time'}</div>
-          ${replyInfo}
-          <div class="post-body">${escapeHtml(p.text)}</div>
-          ${fileInfo}
-          <div class="post-actions">
-            <button class="reply-btn" data-path="${escapeHtml(p.path)}" data-text="${escapeAttr(p.text)}" data-author="${escapeHtml(p.author_id)}">↩ Reply</button>
-          </div>
-        </div>
-      `;
-    }).join('');
-
-    // Wire reply buttons
-    listEl.querySelectorAll('.reply-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        setReplyTarget({
-          path: btn.dataset.path,
-          text: btn.dataset.text,
-          author_id: btn.dataset.author,
-        });
-      });
+    const posts = await listRecentPosts(50);
+    const container = document.getElementById('feed-container');
+    renderFeed(container, posts, {
+      onReply: (post) => setReplyTarget(post),
     });
   } catch (e) {
-    console.error('Failed to load posts:', e);
-  }
-}
-
-// ── Preview ──
-async function handleRender() {
-  const btn = document.getElementById('btn-render');
-  const statusEl = document.getElementById('render-status');
-
-  btn.disabled = true;
-  btn.textContent = 'Rendering…';
-
-  try {
-    const initialized = await isInitialized();
-    if (!initialized) {
-      showStatus(statusEl, 'No identity found. Initialize first.', 'error');
-      return;
-    }
-
-    await renderSite();
-    await refreshPreview();
-    showStatus(statusEl, 'Rendered!', 'success');
-  } catch (e) {
-    showStatus(statusEl, `Error: ${e.message}`, 'error');
-  } finally {
-    btn.disabled = false;
-    btn.textContent = 'Render';
-  }
-}
-
-let previewPath = 'pages/latest.html';
-
-function inlinePreviewAssets(html, currentDir) {
-  let css = '';
-  const cssBytes = readWorkspaceFile('static/global/style.css');
-  if (cssBytes) css = new TextDecoder().decode(cssBytes);
-  if (css) {
-    html = html.replace(/<link[^>]*style\.css[^>]*>/, `<style>${css}</style>`);
-  }
-  const navScript = `<script>
-document.addEventListener('click', function(e) {
-  var a = e.target.closest('a');
-  if (!a) return;
-  e.preventDefault();
-  var href = a.getAttribute('href');
-  if (href) window.parent.postMessage({type:'preview-nav', href:href, from:'${currentDir}'}, '*');
-});
-<\/script>`;
-  html = html.replace('</body>', navScript + '</body>');
-  return html;
-}
-
-function loadPreviewPage(relPath) {
-  const frame = document.getElementById('preview-frame');
-  const html = getRenderedFile(relPath);
-  if (html) {
-    const dir = relPath.substring(0, relPath.lastIndexOf('/') + 1);
-    frame.srcdoc = inlinePreviewAssets(html, dir);
-    previewPath = relPath;
-  } else {
-    frame.srcdoc = `<body style="background:#1a1a2e;color:#aaa;font-family:sans-serif;padding:2rem;text-align:center"><p>Page not found: ${relPath}</p></body>`;
-  }
-}
-
-window.addEventListener('message', (e) => {
-  if (e.data?.type !== 'preview-nav') return;
-  const href = e.data.href;
-  const fromDir = e.data.from;
-  const combined = fromDir + href;
-  const parts = combined.split('/');
-  const resolved = [];
-  for (const p of parts) {
-    if (p === '..') { if (resolved.length) resolved.pop(); }
-    else if (p && p !== '.') resolved.push(p);
-  }
-  loadPreviewPage(resolved.join('/'));
-});
-
-async function refreshPreview() {
-  const html = getRenderedFile(previewPath);
-  if (html) {
-    loadPreviewPage(previewPath);
-  } else {
-    const frame = document.getElementById('preview-frame');
-    frame.srcdoc = '<body style="background:#1a1a2e;color:#aaa;font-family:sans-serif;padding:2rem;text-align:center"><p>No rendered pages yet. Click <b>Render</b> to generate.</p></body>';
+    console.error('Failed to load feed:', e);
   }
 }
 
@@ -577,6 +453,14 @@ async function handlePublish() {
   btn.textContent = 'Publishing…';
 
   try {
+    // Render static site before publishing so pages are up to date
+    const initialized = await isInitialized();
+    if (initialized) {
+      showStatus(statusEl, 'Rendering site…', 'success');
+      await renderSite();
+      await saveToIDB(pyodide, getWorkspacePath());
+    }
+
     const pendingPaths = await getPendingFiles();
     if (pendingPaths.length === 0) {
       showStatus(statusEl, 'Nothing to publish', 'success');
@@ -707,8 +591,7 @@ async function refreshSync() {
 
 async function refreshCurrentView() {
   switch (currentView) {
-    case 'compose': return refreshCompose();
-    case 'preview': return refreshPreview();
+    case 'feed': return refreshFeed();
     case 'identity': return refreshIdentity();
     case 'sync': return refreshSync();
   }

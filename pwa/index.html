@@ -13,8 +13,7 @@
   <header>
     <h1>⚡ Coulomb</h1>
     <nav>
-      <button id="nav-compose" class="nav-btn active">Compose</button>
-      <button id="nav-preview" class="nav-btn">Preview</button>
+      <button id="nav-feed" class="nav-btn active">Feed</button>
       <button id="nav-identity" class="nav-btn">Identity</button>
       <button id="nav-sync" class="nav-btn">Sync</button>
     </nav>
@@ -30,14 +29,14 @@
       </div>
     </section>
 
-    <!-- Compose view -->
-    <section id="view-compose" class="view hidden">
+    <!-- Feed view: compose + threaded feed -->
+    <section id="view-feed" class="view hidden">
       <div class="compose-box">
         <div id="reply-context" class="reply-context hidden">
           <span id="reply-label">Replying to…</span>
           <button id="btn-cancel-reply" class="cancel-reply-btn">✕</button>
         </div>
-        <textarea id="post-text" placeholder="What's on your mind?" rows="6"></textarea>
+        <textarea id="post-text" placeholder="What's on your mind?" rows="4"></textarea>
         <div class="compose-actions">
           <label class="file-attach-btn">
             📎 Attach
@@ -48,22 +47,7 @@
         </div>
       </div>
       <div id="post-status" class="status-msg hidden"></div>
-      <div id="recent-posts">
-        <h2>Recent Posts</h2>
-        <div id="posts-list"></div>
-      </div>
-    </section>
-
-    <!-- Preview view -->
-    <section id="view-preview" class="view hidden">
-      <div class="preview-controls">
-        <button id="btn-render" class="primary-btn">Render</button>
-        <button id="btn-preview-back" class="secondary-btn">← Latest</button>
-        <div id="render-status"></div>
-      </div>
-      <div id="preview-container">
-        <iframe id="preview-frame" sandbox="allow-scripts"></iframe>
-      </div>
+      <div id="feed-container"></div>
     </section>
 
     <!-- Identity view -->

@@ -297,6 +297,16 @@ os.chdir('${getWorkspace()}')
 
 import cbor2
 
+# Build latest identity config map (author_id → config dict)
+_latest_configs = {}
+for _id_file in glob.glob('${getPublic()}/identity/*/latest.cbor'):
+    try:
+        with open(_id_file, 'rb') as f:
+            _id_author = cbor2.load(f)['content']['author']
+        _latest_configs[_id_author['id']] = _id_author.get('config', {})
+    except Exception:
+        pass
+
 post_files = sorted(glob.glob('${getPublic()}/posts/**/*.cbor', recursive=True), reverse=True)[:${limit}]
 
 posts = []
@@ -308,7 +318,9 @@ for pf in post_files:
             entry = cbor2.load(f)
         content = entry['content']
         author = content.get('author', {})
-        config = author.get('config', {})
+        author_id = author.get('id', '')
+        # Use latest identity config for display, fall back to per-post snapshot
+        config = _latest_configs.get(author_id, author.get('config', {}))
         file_list = content.get('files', [])
         reply_to = content.get('reply_to', None)
         posts.append({
@@ -316,7 +328,7 @@ for pf in post_files:
             'rel_path': pf.replace('${getPublic()}/', ''),
             'text': content.get('text', ''),
             'time': content.get('time', ''),
-            'author_id': author.get('id', ''),
+            'author_id': author_id,
             'display_name': config.get('display_name', ''),
             'files': [f.get('name', '') for f in file_list],
             'file_count': len(file_list),

@@ -559,3 +559,108 @@ label {
   height: auto;
   border-radius: var(--radius);
 }
+
+/* Feed */
+#feed-container {
+  margin-top: 1rem;
+}
+
+.feed-empty {
+  text-align: center;
+  color: var(--text-muted);
+  padding: 2rem;
+}
+
+.feed-post {
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
+.feed-reply {
+  border-left: 2px solid var(--border);
+  margin-top: 0.5rem;
+  background: var(--bg);
+}
+
+.feed-post-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.4rem;
+}
+
+.feed-avatar svg {
+  display: block;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.feed-meta {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.feed-author {
+  font-weight: 600;
+  font-size: 0.9rem;
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.feed-author svg {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
+.feed-time {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.feed-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.5;
+  margin-bottom: 0.4rem;
+}
+
+.feed-files {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.feed-reply-badge {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  font-style: italic;
+  margin-bottom: 0.25rem;
+}
+
+.feed-actions {
+  margin-top: 0.25rem;
+}
+
+.feed-reply-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  cursor: pointer;
+  padding: 0.2rem 0.5rem;
+  border-radius: var(--radius);
+}
+
+.feed-reply-btn:hover {
+  background: var(--surface-2);
+  color: var(--accent);
+}
