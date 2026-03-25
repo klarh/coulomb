@@ -18,6 +18,8 @@ import { generateIdenticonSVG } from './identicon.js';
 function applyTheme(accent, mode) {
   if (accent) {
     document.documentElement.style.setProperty('--accent', accent);
+  } else {
+    document.documentElement.style.removeProperty('--accent');
   }
   if (mode === 'light') {
     document.documentElement.setAttribute('data-theme', 'light');
@@ -27,6 +29,15 @@ function applyTheme(accent, mode) {
   } else {
     document.documentElement.removeAttribute('data-theme');
   }
+}
+
+function getThemeStorageKey() {
+  return `coulomb_theme_${getActiveAccount()}`;
+}
+
+function loadAndApplyTheme() {
+  const saved = JSON.parse(localStorage.getItem(getThemeStorageKey()) || '{}');
+  applyTheme(saved.accent, saved.mode);
 }
 
 // ── State ──
@@ -85,9 +96,8 @@ for item in os.listdir(old):
 
     backend.tryRestore();
 
-    // Apply saved theme immediately
-    const savedTheme = JSON.parse(localStorage.getItem('coulomb_theme') || '{}');
-    applyTheme(savedTheme.accent, savedTheme.mode);
+    // Apply saved theme for active account
+    loadAndApplyTheme();
 
     document.getElementById('loading-screen').classList.add('hidden');
     showView('feed');
@@ -366,7 +376,7 @@ async function handleSaveSiteConfig() {
 
     // Apply and cache theme locally for instant boot
     applyTheme(accent, mode);
-    localStorage.setItem('coulomb_theme', JSON.stringify({ accent, mode }));
+    localStorage.setItem(getThemeStorageKey(), JSON.stringify({ accent, mode }));
 
     showStatus(statusEl, 'Site settings saved!', 'success');
   } catch (e) {
@@ -693,6 +703,7 @@ async function handleCreateAccount() {
     await createAccount(name);
     await switchAccount(name);
     await restoreFromIDB(getPyodide(), getWorkspacePath());
+    loadAndApplyTheme();
     nameEl.value = '';
     closeSidebar();
     await refreshSidebar();
@@ -709,6 +720,7 @@ async function handleSwitchAccount(name) {
     await saveToIDB(pyodide, getWorkspacePath());
     await switchAccount(name);
     await restoreFromIDB(getPyodide(), getWorkspacePath());
+    loadAndApplyTheme();
     closeSidebar();
     await refreshSidebar();
     // If the account has no identity, go to Identity tab to initialize
