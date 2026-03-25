@@ -3,7 +3,7 @@ import { saveToIDB, restoreFromIDB, getChangelog, clearChangelog } from './fs-sy
 import {
   ensureWorkspace, isInitialized, initialize, getIdentityInfo,
   setDisplayName, createPost, listRecentPosts, getPendingFiles,
-  readWorkspaceFile, renderSite, getRenderedPage, listRenderedPages
+  readWorkspaceFile, renderSite, getRenderedPage, getRenderedFile, listRenderedPages
 } from './coulomb-bridge.js';
 import { GitHubPagesBackend } from './storage/github.js';
 
@@ -94,6 +94,10 @@ function bindEvents() {
 
   // Preview
   document.getElementById('btn-render').addEventListener('click', handleRender);
+  document.getElementById('btn-preview-back').addEventListener('click', () => {
+    previewPath = 'pages/latest.html';
+    refreshPreview();
+  });
 
   // Identity
   document.getElementById('btn-init').addEventListener('click', handleInit);
@@ -191,21 +195,66 @@ async function handleRender() {
   }
 }
 
-async function refreshPreview() {
+// Current preview path relative to public/ (e.g. "pages/latest.html")
+let previewPath = 'pages/latest.html';
+
+function inlinePreviewAssets(html, currentDir) {
+  // Inline CSS since srcdoc can't resolve paths to Pyodide FS
+  const cssBytes = readWorkspaceFile('static/global/style.css');
+  if (cssBytes) {
+    const css = new TextDecoder().decode(cssBytes);
+    html = html.replace(
+      /<link[^>]*style\.css[^>]*>/,
+      `<style>${css}</style>`
+    );
+  }
+  // Inject click interceptor to handle navigation within the preview
+  const navScript = `<script>
+document.addEventListener('click', function(e) {
+  var a = e.target.closest('a');
+  if (!a) return;
+  e.preventDefault();
+  var href = a.getAttribute('href');
+  if (href) window.parent.postMessage({type:'preview-nav', href:href, from:'${currentDir}'}, '*');
+});
+<\/script>`;
+  html = html.replace('</body>', navScript + '</body>');
+  return html;
+}
+
+function loadPreviewPage(relPath) {
   const frame = document.getElementById('preview-frame');
-  let html = getRenderedPage('latest.html');
+  const html = getRenderedFile(relPath);
   if (html) {
-    // Inline the CSS since srcdoc can't resolve relative paths to Pyodide FS
-    const cssBytes = readWorkspaceFile('static/global/style.css');
-    if (cssBytes) {
-      const css = new TextDecoder().decode(cssBytes);
-      html = html.replace(
-        /<link[^>]*style\.css[^>]*>/,
-        `<style>${css}</style>`
-      );
-    }
-    frame.srcdoc = html;
+    const dir = relPath.substring(0, relPath.lastIndexOf('/') + 1);
+    frame.srcdoc = inlinePreviewAssets(html, dir);
+    previewPath = relPath;
   } else {
+    frame.srcdoc = `<body style="background:#1a1a2e;color:#aaa;font-family:sans-serif;padding:2rem;text-align:center"><p>Page not found: ${relPath}</p></body>`;
+  }
+}
+
+// Listen for navigation messages from the preview iframe
+window.addEventListener('message', (e) => {
+  if (e.data?.type !== 'preview-nav') return;
+  const href = e.data.href;
+  const fromDir = e.data.from;
+  // Resolve relative path
+  const parts = (fromDir + href).split('/');
+  const resolved = [];
+  for (const p of parts) {
+    if (p === '..') resolved.pop();
+    else if (p && p !== '.') resolved.push(p);
+  }
+  loadPreviewPage(resolved.join('/'));
+});
+
+async function refreshPreview() {
+  const html = getRenderedFile(previewPath);
+  if (html) {
+    loadPreviewPage(previewPath);
+  } else {
+    const frame = document.getElementById('preview-frame');
     frame.srcdoc = '<body style="background:#1a1a2e;color:#aaa;font-family:sans-serif;padding:2rem;text-align:center"><p>No rendered pages yet. Click <b>Render</b> to generate.</p></body>';
   }
 }

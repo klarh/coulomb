@@ -237,6 +237,15 @@ export function getRenderedPage(pageName) {
   }
 }
 
+export function getRenderedFile(relPath) {
+  const pyodide = getPyodide();
+  try {
+    return pyodide.FS.readFile(`${PUBLIC}/${relPath}`, { encoding: 'utf8' });
+  } catch {
+    return null;
+  }
+}
+
 export function listRenderedPages() {
   const pyodide = getPyodide();
   try {
