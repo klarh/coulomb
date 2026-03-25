@@ -131,6 +131,10 @@ def add_parser_args(parser):
     parser.add_argument(
         '--html-dir', default='pages', help='Subdirectory for rendered HTML'
     )
+    parser.add_argument(
+        '--pwa-dir',
+        help='Directory containing PWA files to bundle into the output',
+    )
 
 
 TEMPLATES = dict(
@@ -750,7 +754,8 @@ def write_page_html(
         change_log.write('{}\n'.format(os.path.relpath(target_filename, root)))
 
 
-def main(root, cache_file, hash_name, template_dir, change_log, post_dirs, html_dir):
+def main(root, cache_file, hash_name, template_dir, change_log, post_dirs, html_dir,
+         pwa_dir=None):
     env = jinja2.Environment()
     env.filters['identicon'] = identicon_data_uri
     templates = {}
@@ -784,6 +789,12 @@ def main(root, cache_file, hash_name, template_dir, change_log, post_dirs, html_
             )
 
     cache.update_built_files()
+
+    if pwa_dir and os.path.isdir(pwa_dir):
+        dst = os.path.join(root, 'pwa')
+        if os.path.exists(dst):
+            shutil.rmtree(dst)
+        shutil.copytree(pwa_dir, dst)
 
 
 if __name__ == '__main__':

@@ -513,7 +513,7 @@ _bridge_out = buf.getvalue().decode()
   return result;
 }
 
-export async function renderSite() {
+export async function renderSite({ includePwa = false } = {}) {
   await runPy(`
 import os, shutil, glob
 os.chdir('${getWorkspace()}')
@@ -562,6 +562,8 @@ rebuild_index(
     filter_=None,
 )
 
+_pwa_dir = '/coulomb/pwa' if ${includePwa ? 'True' : 'False'} and os.path.isdir('/coulomb/pwa') else None
+
 from coulomb.render import main as coulomb_render
 coulomb_render(
     root=RENDER_ROOT,
@@ -571,10 +573,14 @@ coulomb_render(
     change_log=None,
     post_dirs=['posts'],
     html_dir='pages',
+    pwa_dir=_pwa_dir,
 )
 
 # Copy rendered pages + updated static assets back to workspace public
-for subdir in ['pages', 'static']:
+_copy_dirs = ['pages', 'static']
+if _pwa_dir:
+    _copy_dirs.append('pwa')
+for subdir in _copy_dirs:
     src = os.path.join(RENDER_ROOT, subdir)
     dst = os.path.join('${getPublic()}', subdir)
     if os.path.exists(src):

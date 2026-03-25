@@ -519,7 +519,8 @@ async function handlePublish() {
     const initialized = await isInitialized();
     if (initialized) {
       showStatus(statusEl, 'Rendering site…', 'success');
-      await renderSite();
+      const includePwa = document.getElementById('publish-include-pwa').checked;
+      await renderSite({ includePwa });
       await saveToIDB(pyodide, getWorkspacePath());
     }
 
