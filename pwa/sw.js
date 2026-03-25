@@ -67,18 +67,20 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Network-first for app assets (always get latest, fall back to cache offline)
+  // Stale-while-revalidate for app assets: serve from cache instantly,
+  // update cache in background. First visit builds cache; subsequent visits
+  // are instant from cache with background refresh.
   if (new URL(url).origin === self.location.origin) {
     event.respondWith(
-      fetch(event.request)
-        .then((response) => {
-          if (response.ok) {
-            const clone = response.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
-          }
-          return response;
+      caches.open(CACHE_NAME).then((cache) =>
+        cache.match(event.request).then((cached) => {
+          const fetchPromise = fetch(event.request).then((response) => {
+            if (response.ok) cache.put(event.request, response.clone());
+            return response;
+          }).catch(() => cached);
+          return cached || fetchPromise;
         })
-        .catch(() => caches.match(event.request))
+      )
     );
     return;
   }
