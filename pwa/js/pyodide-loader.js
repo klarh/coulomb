@@ -59,32 +59,29 @@ export async function loadPyodideRuntime(onProgress) {
 }
 
 async function installNaclShim(pyodide) {
-  // Pure-Python shim that wraps the Web Crypto API / tweetnacl.js
-  // via Pyodide's JS interop for Ed25519 signing operations.
-  // This provides the subset of nacl.signing that coulomb needs.
+  // Load libsodium-wrappers from CDN for real Ed25519 + X25519 crypto.
+  // The Python shims call into libsodium.js via Pyodide's JS interop.
+  await new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = 'https://cdn.jsdelivr.net/npm/libsodium-wrappers@0.7.15/dist/modules/libsodium-wrappers.js';
+    script.onload = resolve;
+    script.onerror = reject;
+    document.head.appendChild(script);
+  });
+  await window.sodium.ready;
+
   pyodide.FS.mkdirTree('/lib/python/nacl');
   pyodide.FS.writeFile('/lib/python/nacl/__init__.py', '');
+
   pyodide.FS.writeFile('/lib/python/nacl/signing.py', `
-"""Minimal nacl.signing shim using tweetnacl.js via Pyodide JS interop."""
-from pyodide.ffi import to_js
-from js import Uint8Array, crypto
-import hashlib
-import struct
+"""nacl.signing shim backed by libsodium.js via Pyodide JS interop."""
+from js import sodium
 
-# We use a pure Python Ed25519 fallback since we need deterministic
-# key generation from seed bytes. This is the standard ref10 implementation.
-# For production, prefer the real PyNaCl or a WASM libsodium build.
-
-class _Ed25519:
-    """Minimal Ed25519 using Python hashlib + standard constants."""
-    # This is a placeholder - in practice we'd bundle a tested pure-Python
-    # Ed25519 implementation or use a JS library via interop.
-    pass
 
 class VerifyKey:
     def __init__(self, key_bytes):
-        if isinstance(key_bytes, bytes) and len(key_bytes) == 32:
-            self._key = key_bytes
+        if isinstance(key_bytes, (bytes, bytearray)) and len(key_bytes) == 32:
+            self._key = bytes(key_bytes)
         else:
             raise ValueError("VerifyKey must be 32 bytes")
 
@@ -92,57 +89,82 @@ class VerifyKey:
         return self._key
 
     def verify(self, message, signature):
-        # Verification delegated to JS interop or pure-Python Ed25519
-        raise NotImplementedError("Signature verification requires PyNaCl or JS interop")
+        from pyodide.ffi import to_js
+        ok = sodium.crypto_sign_verify_detached(
+            to_js(signature), to_js(message), to_js(self._key)
+        )
+        if not ok:
+            raise Exception("Signature was forged or corrupt")
+        return message
 
-class SignedMessage:
-    def __init__(self, signature, message):
-        self.signature = signature
-        self.message = message
+
+class SignedMessage(bytes):
+    signature = b''
+    message = b''
+
+    def __new__(cls, signature, message):
+        obj = super().__new__(cls, signature + message)
+        obj.signature = signature
+        obj.message = message
+        return obj
+
 
 class SigningKey:
     def __init__(self, seed=None):
+        from pyodide.ffi import to_js
         if seed is not None:
             if len(seed) != 32:
                 raise ValueError("Seed must be 32 bytes")
-            self._seed = seed
-            # Derive keypair from seed - requires Ed25519 implementation
-            self.verify_key = VerifyKey(self._derive_public_key(seed))
+            self._seed = bytes(seed)
+            kp = sodium.crypto_sign_seed_keypair(to_js(self._seed))
+            self._pk = bytes(kp.publicKey.to_py())
+            self._sk = bytes(kp.privateKey.to_py())
         else:
             raise ValueError("Seed required")
+        self.verify_key = VerifyKey(self._pk)
 
     @classmethod
     def generate(cls):
         import secrets
-        seed = secrets.token_bytes(32)
-        return cls(seed)
+        return cls(secrets.token_bytes(32))
 
     def __bytes__(self):
         return self._seed
 
-    def _derive_public_key(self, seed):
-        # Placeholder - needs real Ed25519 key derivation
-        # In the real implementation, this calls into JS or uses pure-Python Ed25519
-        h = hashlib.sha512(seed).digest()
-        # Return first 32 bytes as placeholder (NOT correct Ed25519)
-        return h[:32]
-
     def sign(self, message):
-        # Placeholder - needs real Ed25519 signing
-        raise NotImplementedError("Signing requires PyNaCl or JS interop")
+        from pyodide.ffi import to_js
+        sig = bytes(sodium.crypto_sign_detached(to_js(message), to_js(self._sk)).to_py())
+        return SignedMessage(sig, message)
 `);
 
   pyodide.FS.writeFile('/lib/python/nacl/public.py', `
-"""Minimal nacl.public shim - placeholder for X25519."""
-import secrets
+"""nacl.public shim backed by libsodium.js via Pyodide JS interop."""
+from pyodide.ffi import to_js
+from js import sodium
+
+
+class PublicKey:
+    def __init__(self, public_key):
+        if isinstance(public_key, (bytes, bytearray)) and len(public_key) == 32:
+            self._key = bytes(public_key)
+        else:
+            raise ValueError("PublicKey must be 32 bytes")
+
+    def __bytes__(self):
+        return self._key
+
 
 class PrivateKey:
     def __init__(self, private_key=None):
         if private_key is not None:
-            self._key = private_key
+            if len(private_key) != 32:
+                raise ValueError("PrivateKey must be 32 bytes")
+            self._key = bytes(private_key)
         else:
+            import secrets
             self._key = secrets.token_bytes(32)
-        self.public_key = PublicKey(self._derive_public(self._key))
+        pk_bytes = bytes(sodium.crypto_scalarmult_base(to_js(self._key)).to_py())
+        self.public_key = PublicKey(pk_bytes)
 
     @classmethod
     def generate(cls):
@@ -151,16 +173,69 @@ class PrivateKey:
     def __bytes__(self):
         return self._key
 
-    def _derive_public(self, private):
-        import hashlib
-        return hashlib.sha256(private).digest()
 
-class PublicKey:
-    def __init__(self, public_key):
-        self._key = public_key
+class SealedBox:
+    """Anonymous public-key encryption (crypto_box_seal)."""
+    def __init__(self, key):
+        if isinstance(key, PublicKey):
+            self._pk = key._key
+            self._sk = None
+        elif isinstance(key, PrivateKey):
+            self._pk = bytes(key.public_key)
+            self._sk = key._key
+        else:
+            raise TypeError("SealedBox requires a PublicKey or PrivateKey")
 
-    def __bytes__(self):
-        return self._key
+    def encrypt(self, plaintext):
+        return bytes(sodium.crypto_box_seal(to_js(plaintext), to_js(self._pk)).to_py())
+
+    def decrypt(self, ciphertext):
+        if self._sk is None:
+            raise TypeError("Cannot decrypt with a public key")
+        return bytes(sodium.crypto_box_seal_open(
+            to_js(ciphertext), to_js(self._pk), to_js(self._sk)
+        ).to_py())
+`);
+
+  pyodide.FS.writeFile('/lib/python/nacl/secret.py', `
+"""nacl.secret shim backed by libsodium.js via Pyodide JS interop."""
+from pyodide.ffi import to_js
+from js import sodium
+
+KEY_SIZE = 32
+NONCE_SIZE = 24
+MACBYTES = 16
+
+
+class SecretBox:
+    def __init__(self, key):
+        if len(key) != KEY_SIZE:
+            raise ValueError(f"Key must be {KEY_SIZE} bytes")
+        self._key = bytes(key)
+
+    def encrypt(self, plaintext, nonce=None):
+        if nonce is None:
+            nonce = bytes(sodium.randombytes_buf(NONCE_SIZE).to_py())
+        ct = bytes(sodium.crypto_secretbox_easy(
+            to_js(plaintext), to_js(nonce), to_js(self._key)
+        ).to_py())
+        return nonce + ct
+
+    def decrypt(self, ciphertext, nonce=None):
+        if nonce is None:
+            nonce = ciphertext[:NONCE_SIZE]
+            ciphertext = ciphertext[NONCE_SIZE:]
+        return bytes(sodium.crypto_secretbox_open_easy(
+            to_js(ciphertext), to_js(nonce), to_js(self._key)
+        ).to_py())
+`);
+
+  pyodide.FS.writeFile('/lib/python/nacl/utils.py', `
+"""nacl.utils shim."""
+from js import sodium
+
+def random(size):
+    return bytes(sodium.randombytes_buf(size).to_py())
 `);
 
   // Add to Python path
