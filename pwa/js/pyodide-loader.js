@@ -2,6 +2,7 @@ const PYODIDE_VERSION = '0.27.4';
 const PYODIDE_CDN = `https://cdn.jsdelivr.net/pyodide/v${PYODIDE_VERSION}/full/`;
 
 let pyodideInstance = null;
+let _deferredPackagesLoaded = false;
 
 export async function loadPyodideRuntime(onProgress) {
   if (pyodideInstance) return pyodideInstance;
@@ -27,35 +28,39 @@ export async function loadPyodideRuntime(onProgress) {
 
   onProgress?.('Installing packages…', 50);
 
-  // Install required packages
+  // Install micropip, then batch-install essential packages in parallel
   await pyodideInstance.loadPackage('micropip');
   const micropip = pyodideInstance.pyimport('micropip');
-  await micropip.install('cbor2');
 
-  onProgress?.('Installing cryptography…', 65);
-  // PyNaCl may or may not be available as a Pyodide package.
-  // Try micropip first, fall back to a pure-Python shim if needed.
-  try {
-    await micropip.install('pynacl');
-  } catch (e) {
+  // cbor2 is needed immediately; pynacl may fail and needs a fallback
+  const naclP = micropip.install('pynacl').catch(async () => {
     console.warn('PyNaCl not available via micropip, installing fallback shim');
     await installNaclShim(pyodideInstance);
-  }
+  });
+  await Promise.all([micropip.install('cbor2'), naclP]);
 
-  onProgress?.('Installing templates…', 80);
-  await micropip.install('jinja2');
+  onProgress?.('Loading Coulomb…', 75);
 
-  onProgress?.('Loading SQLite…', 83);
-  await pyodideInstance.loadPackage('sqlite3');
-
-  onProgress?.('Loading Coulomb…', 85);
-
-  // Load the coulomb package into the virtual filesystem
+  // Fetch all coulomb source files in parallel
   await loadCoulombSource(pyodideInstance);
 
   onProgress?.('Ready', 100);
 
   return pyodideInstance;
+}
+
+/**
+ * Load packages only needed for rendering (jinja2, sqlite3).
+ * Called lazily on first renderSite() to keep boot fast.
+ */
+export async function ensureRenderPackages() {
+  if (_deferredPackagesLoaded) return;
+  const micropip = pyodideInstance.pyimport('micropip');
+  await Promise.all([
+    micropip.install('jinja2'),
+    pyodideInstance.loadPackage('sqlite3'),
+  ]);
+  _deferredPackagesLoaded = true;
 }
 
 async function installNaclShim(pyodide) {
@@ -264,37 +269,23 @@ async function loadCoulombSource(pyodide) {
   ];
 
   pyodide.FS.mkdirTree('/coulomb/coulomb');
+  pyodide.FS.mkdirTree('/coulomb/template/static/global');
 
-  for (const fname of coulombFiles) {
-    try {
-      const resp = await fetch(`../coulomb/${fname}`);
-      if (resp.ok) {
-        const text = await resp.text();
-        pyodide.FS.writeFile(`/coulomb/coulomb/${fname}`, text);
-      }
-    } catch (e) {
-      console.warn(`Failed to load coulomb/${fname}:`, e);
-    }
-  }
-
-  // Load the template directory (init.main copies it into public/)
-  const templateFiles = [
-    'static/global/style.css',
+  // Fetch all source files in parallel
+  const fetches = [
+    ...coulombFiles.map(fname =>
+      fetch(`../coulomb/${fname}`).then(r => r.ok ? r.text() : null)
+        .then(text => text && { path: `/coulomb/coulomb/${fname}`, text })
+        .catch(() => null)
+    ),
+    fetch('../template/static/global/style.css').then(r => r.ok ? r.text() : null)
+      .then(text => text && { path: '/coulomb/template/static/global/style.css', text })
+      .catch(() => null),
   ];
 
-  for (const relPath of templateFiles) {
-    try {
-      const resp = await fetch(`../template/${relPath}`);
-      if (resp.ok) {
-        const text = await resp.text();
-        const fullPath = `/coulomb/template/${relPath}`;
-        const dir = fullPath.substring(0, fullPath.lastIndexOf('/'));
-        pyodide.FS.mkdirTree(dir);
-        pyodide.FS.writeFile(fullPath, text);
-      }
-    } catch (e) {
-      console.warn(`Failed to load template/${relPath}:`, e);
-    }
+  const results = await Promise.all(fetches);
+  for (const file of results) {
+    if (file) pyodide.FS.writeFile(file.path, file.text);
   }
 
   await pyodide.runPythonAsync(`

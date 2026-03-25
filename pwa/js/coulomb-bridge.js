@@ -1,4 +1,4 @@
-import { loadPyodideRuntime, getPyodide } from './pyodide-loader.js';
+import { loadPyodideRuntime, getPyodide, ensureRenderPackages } from './pyodide-loader.js';
 
 const ACCOUNTS_ROOT = '/accounts';
 const DEFAULT_ACCOUNT = 'default';
@@ -514,6 +514,8 @@ _bridge_out = buf.getvalue().decode()
 }
 
 export async function renderSite({ includePwa = false } = {}) {
+  // jinja2 + sqlite3 are only needed for rendering, loaded lazily
+  await ensureRenderPackages();
   await runPy(`
 import os, shutil, glob
 os.chdir('${getWorkspace()}')
