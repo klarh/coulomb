@@ -2,7 +2,7 @@ import { loadPyodideRuntime } from './pyodide-loader.js';
 import { saveToIDB, restoreFromIDB, getChangelog, clearChangelog } from './fs-sync.js';
 import {
   ensureWorkspace, isInitialized, initialize, getIdentityInfo,
-  setDisplayName, createPost, listRecentPosts, getPendingFiles,
+  setDisplayName, setAvatarUrl, createPost, listRecentPosts, getPendingFiles,
   readWorkspaceFile, renderSite, getRenderedPage, getRenderedFile, listRenderedPages
 } from './coulomb-bridge.js';
 import { GitHubPagesBackend } from './storage/github.js';
@@ -102,6 +102,7 @@ function bindEvents() {
   // Identity
   document.getElementById('btn-init').addEventListener('click', handleInit);
   document.getElementById('btn-set-name').addEventListener('click', handleSetName);
+  document.getElementById('btn-set-avatar').addEventListener('click', handleSetAvatar);
 
   // Sync
   document.getElementById('btn-github-connect').addEventListener('click', handleGitHubConnect);
@@ -199,10 +200,11 @@ async function handleRender() {
 let previewPath = 'pages/latest.html';
 
 function inlinePreviewAssets(html, currentDir) {
-  // Inline CSS since srcdoc can't resolve paths to Pyodide FS
+  // Inline CSS — try template dir first (always latest), fall back to workspace
+  let css = '';
   const cssBytes = readWorkspaceFile('static/global/style.css');
-  if (cssBytes) {
-    const css = new TextDecoder().decode(cssBytes);
+  if (cssBytes) css = new TextDecoder().decode(cssBytes);
+  if (css) {
     html = html.replace(
       /<link[^>]*style\.css[^>]*>/,
       `<style>${css}</style>`
@@ -248,7 +250,6 @@ window.addEventListener('message', (e) => {
     else if (p && p !== '.') resolved.push(p);
   }
   const target = resolved.join('/');
-  console.log('[preview-nav]', { href, fromDir, target });
   loadPreviewPage(target);
 });
 
@@ -300,6 +301,23 @@ async function handleSetName() {
   }
 }
 
+async function handleSetAvatar() {
+  const urlEl = document.getElementById('avatar-url');
+  const url = urlEl.value.trim();
+  if (!url) return;
+
+  const statusEl = document.getElementById('identity-status');
+
+  try {
+    await setAvatarUrl(url);
+    await saveToIDB(pyodide);
+    showStatus(statusEl, 'Avatar updated!', 'success');
+    await refreshIdentity();
+  } catch (e) {
+    showStatus(statusEl, `Error: ${e.message}`, 'error');
+  }
+}
+
 async function refreshIdentity() {
   const infoSection = document.getElementById('identity-info');
   const initSection = document.getElementById('identity-init');
@@ -311,19 +329,24 @@ async function refreshIdentity() {
     if (info) {
       infoSection.classList.remove('hidden');
       initSection.classList.add('hidden');
+      const avatarHtml = info.avatar_url
+        ? `<img src="${escapeHtml(info.avatar_url)}" style="width:48px;height:48px;border-radius:50%;object-fit:cover">`
+        : '';
       document.getElementById('identity-details').innerHTML = `
+        ${avatarHtml}
         <div><strong>Key ID:</strong> ${info.id}</div>
         <div><strong>Display Name:</strong> ${info.display_name || '<not set>'}</div>
+        <div><strong>Avatar:</strong> ${info.avatar_url || '<not set>'}</div>
         <div><strong>Signing Keys:</strong> ${info.signing_keys.length}</div>
       `;
       document.getElementById('display-name').value = info.display_name || '';
+      document.getElementById('avatar-url').value = info.avatar_url || '';
     } else {
       infoSection.classList.add('hidden');
       initSection.classList.remove('hidden');
     }
   } catch (e) {
     console.error('Failed to load identity:', e);
-    // On error, show the init section so the user can at least try to initialize
     infoSection.classList.add('hidden');
     initSection.classList.remove('hidden');
     showStatus(statusEl, `Error loading identity: ${e.message}`, 'error');

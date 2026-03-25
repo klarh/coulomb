@@ -83,10 +83,12 @@ if identity_files:
     with open(identity_files[0], 'rb') as f:
         entry = cbor2.load(f)
     author = entry['content']['author']
+    config = author.get('config', {})
     _bridge_out = json.dumps({
         'id': author['id'],
         'signing_keys': author.get('signing_keys', []),
-        'display_name': author.get('config', {}).get('display_name', ''),
+        'display_name': config.get('display_name', config.get('user.display_name', '')),
+        'avatar_url': config.get('avatar_url', ''),
         'locations': author.get('locations', []),
     })
 `);
@@ -94,9 +96,18 @@ if identity_files:
 }
 
 export async function setDisplayName(name) {
+  return setIdentityConfig([['display_name', name]]);
+}
+
+export async function setAvatarUrl(url) {
+  return setIdentityConfig([['avatar_url', url]]);
+}
+
+async function setIdentityConfig(textPairs) {
   const pyodide = getPyodide();
+  const pairsJson = JSON.stringify(textPairs);
   await pyodide.runPythonAsync(`
-import os, glob
+import os, glob, json
 os.chdir('${WORKSPACE}')
 
 identity_files = glob.glob('${PUBLIC}/identity/*/latest.cbor')
@@ -111,13 +122,15 @@ key_id = author['id']
 
 private_key_files = glob.glob('${PRIVATE}/private_identity.*.cbor') + glob.glob('${PRIVATE}/signing.*.cbor')
 
+_pairs = json.loads(${JSON.stringify(pairsJson)})
+
 from coulomb.identity import set_config
 with open('${CHANGELOG}', 'a') as _cl:
     set_config(
         identity='${PUBLIC}/identity/' + key_id,
         change_log=_cl,
         signatures=private_key_files,
-        text=[('display_name', ${JSON.stringify(name)})]
+        text=_pairs
     )
 `);
 }
@@ -203,21 +216,56 @@ export function readWorkspaceFile(relativePath) {
 
 export async function renderSite() {
   await runPy(`
-import os
+import os, shutil, glob
 os.chdir('${WORKSPACE}')
 
-# rebuild_index creates/updates index.cbor files that render needs
+# Render in a staging copy so original post CBOR files stay untouched
+# (originals preserve signatures for future cryptographic verification)
+RENDER_ROOT = '${WORKSPACE}/render_staging'
+if os.path.exists(RENDER_ROOT):
+    shutil.rmtree(RENDER_ROOT)
+shutil.copytree('${PUBLIC}', RENDER_ROOT)
+
+# Update template CSS (may be stale from initial init)
+_src = '/coulomb/template/static/global/style.css'
+_dst = os.path.join(RENDER_ROOT, 'static/global/style.css')
+if os.path.exists(_src):
+    os.makedirs(os.path.dirname(_dst), exist_ok=True)
+    shutil.copy(_src, _dst)
+
+# Patch staging post files with latest identity config so re-renders
+# pick up display name / avatar changes
+import cbor2
+identity_files = glob.glob(os.path.join(RENDER_ROOT, 'identity/*/latest.cbor'))
+if identity_files:
+    with open(identity_files[0], 'rb') as f:
+        _latest_author = cbor2.load(f)['content']['author']
+
+    for pf in glob.glob(os.path.join(RENDER_ROOT, 'posts/**/*.cbor'), recursive=True):
+        if os.path.basename(pf) == 'index.cbor':
+            continue
+        try:
+            with open(pf, 'rb') as f:
+                entry = cbor2.load(f)
+            post_author = entry['content']['author']
+            if post_author['id'] == _latest_author['id']:
+                post_author['config'] = _latest_author.get('config', {})
+                with open(pf, 'wb') as f:
+                    cbor2.dump(entry, f, canonical=True)
+        except Exception:
+            pass
+
 from coulomb.rebuild_index import main as rebuild_index
 rebuild_index(
-    root='${PUBLIC}',
+    root=RENDER_ROOT,
     hashes=['sha512'],
-    changelog='${CHANGELOG}',
+    changelog=None,
     filter_=None,
 )
 
 from coulomb.render import main as coulomb_render
 coulomb_render(
-    root='${PUBLIC}',
+    root=RENDER_ROOT,
     cache_file='${PRIVATE}/render_cache.sqlite',
     hash_name='sha512',
     template_dir=None,
@@ -225,6 +273,15 @@ coulomb_render(
     post_dirs=['posts'],
     html_dir='pages',
 )
+
+# Copy rendered pages + updated static assets back to workspace public
+for subdir in ['pages', 'static']:
+    src = os.path.join(RENDER_ROOT, subdir)
+    dst = os.path.join('${PUBLIC}', subdir)
+    if os.path.exists(src):
+        if os.path.exists(dst):
+            shutil.rmtree(dst)
+        shutil.copytree(src, dst)
 `);
 }
 

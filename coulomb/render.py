@@ -4,6 +4,7 @@ import contextlib
 import datetime
 import enum
 import hashlib
+import math
 import os
 import shutil
 import sqlite3
@@ -12,6 +13,101 @@ import cbor2
 import jinja2
 
 from .cmd import register_subcommand
+
+
+def _cubehelix_rgb(lam, s=0, r=1, h=1.2, gamma=1):
+    """Evaluate cubehelix at a single lambda value.
+
+    Returns (R, G, B) each in [0, 1]. As lambda increases, the color
+    spirals through hues along the RGB cube diagonal — so different
+    lambda values give both different lightness AND different hue.
+
+    See Green 2011: http://adsabs.harvard.edu/abs/2011BASI...39..289G
+    """
+    lam = max(0.0, min(1.0, lam))
+    lam_g = lam ** gamma
+    phi = 2 * math.pi * (s / 3 + r * lam)
+    a = h * lam_g * (1 - lam_g) * 0.5
+    cos_phi = math.cos(phi)
+    sin_phi = math.sin(phi)
+    return (
+        max(0, min(1, lam_g + a * (-0.14861 * cos_phi + 1.78277 * sin_phi))),
+        max(0, min(1, lam_g + a * (-0.29227 * cos_phi - 0.90649 * sin_phi))),
+        max(0, min(1, lam_g + a * (1.97294 * cos_phi))),
+    )
+
+
+def _rgb_hex(r, g, b):
+    return f'#{int(r * 255):02x}{int(g * 255):02x}{int(b * 255):02x}'
+
+
+def generate_identicon_svg(id_string, size=80):
+    """Generate a symmetry-based identicon SVG from an ID string.
+
+    Uses Fourier harmonics at multiples of N to create naturally N-fold
+    symmetric curves, with multiple concentric rings for a mandala effect.
+    Colors use cubehelix so each ring gets a genuinely different hue
+    (not just lighter/darker) as lightness varies along the helix.
+    """
+    h = id_string
+    while len(h) < 64:
+        h += h
+
+    # Cubehelix start hue from ID (0–3 covers full rotation)
+    ch_start = int(h[:2], 16) / 256 * 3
+    # Hue rotation rate from ID (0–1)
+    ch_rot = int(h[2], 16) / 15
+    n = [3, 4, 5, 6, 8][int(h[3], 16) % 5]
+    cx, cy = size / 2, size / 2
+    max_r = size * 0.45
+    num_rings = 2 + int(h[4], 16) % 2
+
+    # Ring lambdas spread across the cubehelix — each gets a different
+    # lightness AND hue due to the helical path through RGB space
+    ring_lambdas = [0.35 + 0.25 * ring / max(num_rings - 1, 1)
+                    for ring in range(num_rings)]
+
+    # Draw outermost ring first so inner rings layer on top,
+    # revealing each ring's distinct cubehelix color
+    paths = ''
+    for ring in reversed(range(num_rings)):
+        base_r = max_r * (ring + 1) / num_rings * 0.8
+        ring_points = []
+
+        for s in range(64):
+            theta = s / 64 * 2 * math.pi
+            r = base_r
+            for k in range(1, 4):
+                idx = 5 + ring * 8 + k * 2
+                amp = int(h[idx % len(h)], 16) / 15.0 * base_r * 0.4
+                phase = int(h[(idx + 1) % len(h)], 16) / 15.0 * 2 * math.pi
+                r += amp * math.cos(n * k * theta + phase)
+            r = max(0, min(max_r, r))
+            x = cx + r * math.cos(theta)
+            y = cy + r * math.sin(theta)
+            ring_points.append(f'{x:.1f},{y:.1f}')
+
+        rgb = _cubehelix_rgb(ring_lambdas[ring], s=ch_start, r=ch_rot, h=1.4)
+        fill = _rgb_hex(*rgb)
+        d = 'M ' + ' L '.join(ring_points) + ' Z'
+        paths += f'<path d="{d}" fill="{fill}"/>'
+
+    bg_rgb = _cubehelix_rgb(0.08, s=ch_start, r=ch_rot, h=0.6)
+    bg = _rgb_hex(*bg_rgb)
+    return (
+        f'<svg xmlns="http://www.w3.org/2000/svg" '
+        f'width="{size}" height="{size}" viewBox="0 0 {size} {size}">'
+        f'<circle cx="{cx}" cy="{cy}" r="{size/2}" fill="{bg}"/>'
+        f'{paths}</svg>'
+    )
+
+
+def identicon_data_uri(id_string, size=80):
+    """Return an identicon as a data: URI for use in img src."""
+    import base64
+    svg = generate_identicon_svg(id_string, size)
+    b64 = base64.b64encode(svg.encode()).decode()
+    return f'data:image/svg+xml;base64,{b64}'
 
 
 @register_subcommand('render', help='Render HTML views of posts')
@@ -41,38 +137,64 @@ TEMPLATES = dict(
     post="""<!DOCTYPE html>
 <html lang="en">
 <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{{ text_config.get('user_post.page_title', 'Posts')|e }}</title>
     <link rel="stylesheet" type="text/css" href="{{root_path}}/static/global/style.css">
 </head>
 <body>
-    <div class="center_column">
+    <div class="feed">
     {% for post in posts %}
-        <div class="post">
-            <div class="author">{{ post.author.get('config', {}).get('user.display_name', 'User {}'.format(post.author.id))|e }}</div>
-            <p class="post_text">{{ post.text|e }}</p>
-            <div class="timestamp">
-                <a href="{{ post.direct_link }}">{{ post.time }}</a>
-            </div>
-        {% for reply in post.get('replies', []) %}
-            <div class="post">
-                <div class="author">{{ reply.author.get('config', {}).get('user.display_name', 'User {}'.format(reply.author.id))|e }}</div>
-                <p class="post_text">{{ reply.text|e }}</p>
-                <div class="timestamp">
-                    <a href="{{ reply.direct_link }}">{{ reply.time }}</a>
+        <article class="post-card">
+            <div class="post-header">
+                {% set avatar_url = post.author.get('config', {}).get('avatar_url', '') %}
+                {% set display_name = post.author.get('config', {}).get('display_name', '') or post.author.get('config', {}).get('user.display_name', '') %}
+                {% if avatar_url %}
+                <img class="avatar" src="{{ avatar_url }}" alt="">
+                {% else %}
+                <img class="avatar" src="{{ post.author.id | identicon }}" alt="">
+                {% endif %}
+                <div class="post-meta">
+                    <span class="display-name">{{ (display_name or 'User ' ~ post.author.id[:8] ~ '…')|e }}</span>
+                    <img class="identicon-badge" src="{{ post.author.id | identicon(16) }}" alt="" title="{{ post.author.id[:16] }}…">
                 </div>
+                <a class="post-time" href="{{ post.direct_link }}">{{ post.time[:16] }}</a>
             </div>
-        {% endfor %}
-        </div>
+            <div class="post-body">{{ post.text|e }}</div>
+            {% for reply in post.get('replies', []) %}
+            <div class="reply-card">
+                <div class="post-header">
+                    {% set r_avatar = reply.author.get('config', {}).get('avatar_url', '') %}
+                    {% set r_name = reply.author.get('config', {}).get('display_name', '') or reply.author.get('config', {}).get('user.display_name', '') %}
+                    {% if r_avatar %}
+                    <img class="avatar avatar-sm" src="{{ r_avatar }}" alt="">
+                    {% else %}
+                    <img class="avatar avatar-sm" src="{{ reply.author.id | identicon(32) }}" alt="">
+                    {% endif %}
+                    <div class="post-meta">
+                        <span class="display-name">{{ (r_name or 'User ' ~ reply.author.id[:8] ~ '…')|e }}</span>
+                        <img class="identicon-badge" src="{{ reply.author.id | identicon(16) }}" alt="" title="{{ reply.author.id[:16] }}…">
+                    </div>
+                    {% if reply.direct_link %}
+                    <a class="post-time" href="{{ reply.direct_link }}">{{ reply.time[:16] }}</a>
+                    {% else %}
+                    <span class="post-time">{{ reply.time[:16] }}</span>
+                    {% endif %}
+                </div>
+                <div class="post-body">{{ reply.text|e }}</div>
+            </div>
+            {% endfor %}
+        </article>
     {% endfor %}
-    <div class="foot">
-    {% if next_page %}
-        <a href="{{ next_page }}"><div class="page_button">Next page</div></a>
-    {% endif %}
+    </div>
+    <nav class="pagination">
     {% if previous_page %}
-        <a href="{{ previous_page }}"><div class="page_button">Previous page</div></a>
+        <a href="{{ previous_page }}" class="page-btn">← Newer</a>
     {% endif %}
-    </div>
-    </div>
+    {% if next_page %}
+        <a href="{{ next_page }}" class="page-btn">Older →</a>
+    {% endif %}
+    </nav>
 </body>
     """,
 )
@@ -583,6 +705,7 @@ def write_page_html(
 
 def main(root, cache_file, hash_name, template_dir, change_log, post_dirs, html_dir):
     env = jinja2.Environment()
+    env.filters['identicon'] = identicon_data_uri
     templates = {}
     if template_dir:
         with open(os.path.join(template_dir, 'post.jinja'), 'r') as f:
