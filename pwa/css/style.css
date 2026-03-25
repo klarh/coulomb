@@ -550,3 +550,12 @@ label {
   color: var(--text-muted);
   margin: 0.5rem 0;
 }
+
+#provision-qr svg {
+  display: block;
+  margin: 0.5rem auto;
+  max-width: 280px;
+  width: 100%;
+  height: auto;
+  border-radius: var(--radius);
+}

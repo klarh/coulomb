@@ -6,7 +6,7 @@ import {
   addLocation, removeLocation,
   createPost, listRecentPosts, getPendingFiles,
   readWorkspaceFile, renderSite, getRenderedPage, getRenderedFile, listRenderedPages,
-  getSiteConfig, setSiteConfig,
+  getSiteConfig, setSiteConfig, generateQRCodeSVG,
   getActiveAccount, getWorkspacePath, listAccounts, createAccount, switchAccount, deleteAccount
 } from './coulomb-bridge.js';
 import { GitHubPagesBackend } from './storage/github.js';
@@ -942,6 +942,15 @@ _bridge_out = json.dumps({
     const responseUrl = `${location.origin}${location.pathname}#provision/respond/${data.payload}`;
 
     resultEl.classList.remove('hidden');
+
+    try {
+      const qrSvg = await generateQRCodeSVG(responseUrl);
+      document.getElementById('provision-qr').innerHTML =
+        `<p class="help-text">Show this to the new device:</p>${qrSvg}`;
+    } catch (e) {
+      document.getElementById('provision-qr').innerHTML =
+        `<p class="help-text">QR generation failed. Use the link below.</p>`;
+    }
 
     document.getElementById('provision-url-display').innerHTML =
       `<p class="help-text">Or copy this link:</p>

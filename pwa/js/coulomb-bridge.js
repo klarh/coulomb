@@ -442,6 +442,31 @@ export function readWorkspaceFile(relativePath) {
   }
 }
 
+// ── QR Code ──
+
+let segnoLoaded = false;
+
+export async function generateQRCodeSVG(text) {
+  if (!segnoLoaded) {
+    const pyodide = getPyodide();
+    await pyodide.runPythonAsync(`
+import micropip
+await micropip.install('segno')
+`);
+    segnoLoaded = true;
+  }
+
+  const result = await runPy(`
+import segno, io
+
+qr = segno.make(${JSON.stringify(text)})
+buf = io.BytesIO()
+qr.save(buf, kind='svg', scale=4, border=2, dark='#e94560', light='#16213e')
+_bridge_out = buf.getvalue().decode()
+`);
+  return result;
+}
+
 export async function renderSite() {
   await runPy(`
 import os, shutil, glob
