@@ -51,14 +51,14 @@ TEMPLATES = dict(
             <div class="author">{{ post.author.get('config', {}).get('user.display_name', 'User {}'.format(post.author.id))|e }}</div>
             <p class="post_text">{{ post.text|e }}</p>
             <div class="timestamp">
-                <a href="{{ entries[loop.index0].direct_link }}">{{ post.time }}</a>
+                <a href="{{ post.direct_link }}">{{ post.time }}</a>
             </div>
         {% for reply in post.get('replies', []) %}
             <div class="post">
                 <div class="author">{{ reply.author.get('config', {}).get('user.display_name', 'User {}'.format(reply.author.id))|e }}</div>
                 <p class="post_text">{{ reply.text|e }}</p>
                 <div class="timestamp">
-                    <a href="{{ entries[loop.index0].direct_link }}">{{ reply.time }}</a>
+                    <a href="{{ reply.direct_link }}">{{ reply.time }}</a>
                 </div>
             </div>
         {% endfor %}
@@ -516,6 +516,7 @@ def write_page_html(
         with open(post_file, 'w') as f:
             f.write(templates['post'].render(**template_args))
         entries[-1]['direct_link'] = os.path.relpath(post_file, dirname)
+        entries[-1]['content']['direct_link'] = entries[-1]['direct_link']
         if change_log is not None:
             change_log.write('{}\n'.format(os.path.relpath(post_file, root)))
 

@@ -239,14 +239,17 @@ window.addEventListener('message', (e) => {
   if (e.data?.type !== 'preview-nav') return;
   const href = e.data.href;
   const fromDir = e.data.from;
-  // Resolve relative path
-  const parts = (fromDir + href).split('/');
+  // Resolve relative path against the current page's directory
+  const combined = fromDir + href;
+  const parts = combined.split('/');
   const resolved = [];
   for (const p of parts) {
-    if (p === '..') resolved.pop();
+    if (p === '..') { if (resolved.length) resolved.pop(); }
     else if (p && p !== '.') resolved.push(p);
   }
-  loadPreviewPage(resolved.join('/'));
+  const target = resolved.join('/');
+  console.log('[preview-nav]', { href, fromDir, target });
+  loadPreviewPage(target);
 });
 
 async function refreshPreview() {
