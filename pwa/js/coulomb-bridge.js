@@ -200,3 +200,49 @@ export function readWorkspaceFile(relativePath) {
     return null;
   }
 }
+
+export async function renderSite() {
+  await runPy(`
+import os
+os.chdir('${WORKSPACE}')
+
+# rebuild_index creates/updates index.cbor files that render needs
+from coulomb.rebuild_index import main as rebuild_index
+rebuild_index(
+    root='${PUBLIC}',
+    hashes=['sha512'],
+    changelog='${CHANGELOG}',
+    filter_=None,
+)
+
+from coulomb.render import main as coulomb_render
+coulomb_render(
+    root='${PUBLIC}',
+    cache_file='${PRIVATE}/render_cache.sqlite',
+    hash_name='sha512',
+    template_dir=None,
+    change_log=None,
+    post_dirs=['posts'],
+    html_dir='pages',
+)
+`);
+}
+
+export function getRenderedPage(pageName) {
+  const pyodide = getPyodide();
+  try {
+    return pyodide.FS.readFile(`${PUBLIC}/pages/${pageName}`, { encoding: 'utf8' });
+  } catch {
+    return null;
+  }
+}
+
+export function listRenderedPages() {
+  const pyodide = getPyodide();
+  try {
+    const files = pyodide.FS.readdir(`${PUBLIC}/pages`);
+    return files.filter(f => f.endsWith('.html')).sort();
+  } catch {
+    return [];
+  }
+}

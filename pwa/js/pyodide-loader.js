@@ -32,7 +32,7 @@ export async function loadPyodideRuntime(onProgress) {
   const micropip = pyodideInstance.pyimport('micropip');
   await micropip.install('cbor2');
 
-  onProgress?.('Installing cryptography…', 70);
+  onProgress?.('Installing cryptography…', 65);
   // PyNaCl may or may not be available as a Pyodide package.
   // Try micropip first, fall back to a pure-Python shim if needed.
   try {
@@ -41,6 +41,12 @@ export async function loadPyodideRuntime(onProgress) {
     console.warn('PyNaCl not available via micropip, installing fallback shim');
     await installNaclShim(pyodideInstance);
   }
+
+  onProgress?.('Installing templates…', 80);
+  await micropip.install('jinja2');
+
+  onProgress?.('Loading SQLite…', 83);
+  await pyodideInstance.loadPackage('sqlite3');
 
   onProgress?.('Loading Coulomb…', 85);
 

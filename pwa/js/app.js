@@ -3,7 +3,7 @@ import { saveToIDB, restoreFromIDB, getChangelog, clearChangelog } from './fs-sy
 import {
   ensureWorkspace, isInitialized, initialize, getIdentityInfo,
   setDisplayName, createPost, listRecentPosts, getPendingFiles,
-  readWorkspaceFile
+  readWorkspaceFile, renderSite, getRenderedPage, listRenderedPages
 } from './coulomb-bridge.js';
 import { GitHubPagesBackend } from './storage/github.js';
 
@@ -75,6 +75,10 @@ function bindEvents() {
     showView('compose');
     await refreshCompose();
   });
+  document.getElementById('nav-preview').addEventListener('click', async () => {
+    showView('preview');
+    await refreshPreview();
+  });
   document.getElementById('nav-identity').addEventListener('click', async () => {
     showView('identity');
     await refreshIdentity();
@@ -87,6 +91,9 @@ function bindEvents() {
   // Compose
   document.getElementById('btn-post').addEventListener('click', handlePost);
   document.getElementById('post-files').addEventListener('change', handleFileSelect);
+
+  // Preview
+  document.getElementById('btn-render').addEventListener('click', handleRender);
 
   // Identity
   document.getElementById('btn-init').addEventListener('click', handleInit);
@@ -155,6 +162,51 @@ async function refreshCompose() {
     `).join('');
   } catch (e) {
     console.error('Failed to load posts:', e);
+  }
+}
+
+// ── Preview ──
+async function handleRender() {
+  const btn = document.getElementById('btn-render');
+  const statusEl = document.getElementById('render-status');
+
+  btn.disabled = true;
+  btn.textContent = 'Rendering…';
+
+  try {
+    const initialized = await isInitialized();
+    if (!initialized) {
+      showStatus(statusEl, 'No identity found. Initialize first.', 'error');
+      return;
+    }
+
+    await renderSite();
+    await refreshPreview();
+    showStatus(statusEl, 'Rendered!', 'success');
+  } catch (e) {
+    showStatus(statusEl, `Error: ${e.message}`, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Render';
+  }
+}
+
+async function refreshPreview() {
+  const frame = document.getElementById('preview-frame');
+  let html = getRenderedPage('latest.html');
+  if (html) {
+    // Inline the CSS since srcdoc can't resolve relative paths to Pyodide FS
+    const cssBytes = readWorkspaceFile('static/global/style.css');
+    if (cssBytes) {
+      const css = new TextDecoder().decode(cssBytes);
+      html = html.replace(
+        /<link[^>]*style\.css[^>]*>/,
+        `<style>${css}</style>`
+      );
+    }
+    frame.srcdoc = html;
+  } else {
+    frame.srcdoc = '<body style="background:#1a1a2e;color:#aaa;font-family:sans-serif;padding:2rem;text-align:center"><p>No rendered pages yet. Click <b>Render</b> to generate.</p></body>';
   }
 }
 
@@ -333,6 +385,7 @@ async function refreshSync() {
 async function refreshCurrentView() {
   switch (currentView) {
     case 'compose': return refreshCompose();
+    case 'preview': return refreshPreview();
     case 'identity': return refreshIdentity();
     case 'sync': return refreshSync();
   }

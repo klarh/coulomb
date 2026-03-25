@@ -14,6 +14,7 @@
     <h1>⚡ Coulomb</h1>
     <nav>
       <button id="nav-compose" class="nav-btn active">Compose</button>
+      <button id="nav-preview" class="nav-btn">Preview</button>
       <button id="nav-identity" class="nav-btn">Identity</button>
       <button id="nav-sync" class="nav-btn">Sync</button>
     </nav>
@@ -46,6 +47,17 @@
       <div id="recent-posts">
         <h2>Recent Posts</h2>
         <div id="posts-list"></div>
+      </div>
+    </section>
+
+    <!-- Preview view -->
+    <section id="view-preview" class="view hidden">
+      <div class="preview-controls">
+        <button id="btn-render" class="primary-btn">Render</button>
+        <div id="render-status"></div>
+      </div>
+      <div id="preview-container">
+        <iframe id="preview-frame" sandbox="allow-same-origin"></iframe>
       </div>
     </section>
 
