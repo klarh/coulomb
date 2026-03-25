@@ -1,5 +1,5 @@
 import { loadPyodideRuntime, getPyodide } from './pyodide-loader.js';
-import { saveToIDB, restoreFromIDB, getChangelog, clearChangelog, exportWorkspace, importWorkspace } from './fs-sync.js';
+import { saveToIDB, restoreFromIDB, deleteFromIDB, getChangelog, clearChangelog, exportWorkspace, importWorkspace } from './fs-sync.js';
 import {
   ensureWorkspace, isInitialized, initialize, getIdentityInfo,
   setDisplayName, setAvatarUrl, setIdentityConfig,
@@ -66,13 +66,13 @@ async function boot() {
 
     await ensureWorkspace();
 
-    // Migrate from old /workspace path if it exists
+    // One-time migration from old /workspace path
     status.textContent = 'Restoring data…';
     progress.value = 90;
-    const oldRestored = await restoreFromIDB(pyodide, '/workspace');
-    if (oldRestored > 0) {
-      // Migrate old data to default account
-      await pyodide.runPythonAsync(`
+    if (!localStorage.getItem('coulomb_migrated_workspace')) {
+      const oldRestored = await restoreFromIDB(pyodide, '/workspace');
+      if (oldRestored > 0) {
+        await pyodide.runPythonAsync(`
 import os, shutil
 old = '/workspace'
 new = '${getWorkspacePath()}'
@@ -85,7 +85,10 @@ for item in os.listdir(old):
         else:
             shutil.copy2(src, dst)
 `);
-      console.log(`Migrated ${oldRestored} files from legacy /workspace`);
+        await deleteFromIDB('/workspace');
+        console.log(`Migrated ${oldRestored} files from legacy /workspace`);
+      }
+      localStorage.setItem('coulomb_migrated_workspace', '1');
     }
 
     progress.value = 95;
@@ -739,9 +742,22 @@ async function handleSwitchAccount(name) {
 async function handleDeleteAccount(name) {
   if (!confirm(`Permanently delete account "${name}"? All posts, identity, and keys will be lost.`)) return;
   try {
+    const accounts = await listAccounts();
+    const isActive = name === getActiveAccount();
+    if (isActive) {
+      const others = accounts.filter(a => a !== name);
+      const target = others.length > 0 ? others[0] : 'default';
+      if (others.length === 0) await createAccount('default');
+      await switchAccount(target);
+      await restoreFromIDB(getPyodide(), getWorkspacePath());
+      loadAndApplyTheme();
+    }
     await deleteAccount(name);
+    await deleteFromIDB(`/accounts/${name}`);
+    localStorage.removeItem(`coulomb_theme_${name}`);
+    closeSidebar();
     await refreshSidebar();
-    showView('feed');
+    showView(isActive ? 'identity' : 'feed');
     await refreshCurrentView();
   } catch (e) {
     alert(`Error: ${e.message}`);

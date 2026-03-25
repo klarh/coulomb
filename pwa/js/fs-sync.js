@@ -90,6 +90,23 @@ export async function restoreFromIDB(pyodide, basePath = '/workspace') {
   });
 }
 
+// Delete all IDB entries under a prefix
+export async function deleteFromIDB(basePath) {
+  const idb = await openDB();
+  const tx = idb.transaction(STORE_NAME, 'readwrite');
+  const store = tx.objectStore(STORE_NAME);
+  const all = store.getAllKeys();
+
+  return new Promise((resolve, reject) => {
+    all.onsuccess = () => {
+      const keys = all.result.filter(k => k.startsWith(basePath));
+      for (const key of keys) store.delete(key);
+      resolve(keys.length);
+    };
+    all.onerror = () => reject(all.error);
+  });
+}
+
 // List all files in IDB under a prefix (for sync/publish)
 export async function listIDBFiles(basePath = '/workspace') {
   const idb = await openDB();
