@@ -78,10 +78,11 @@ export async function switchAccount(name) {
   await ensureWorkspace();
 }
 
-export async function deleteAccount(name) {
-  if (name === activeAccount) throw new Error('Cannot delete the active account');
+export async function deleteAccount(name, { force = false } = {}) {
+  if (name === activeAccount && !force) throw new Error('Cannot delete the active account');
   await runPy(`
 import shutil, os
+os.chdir('/')
 path = '${ACCOUNTS_ROOT}/${name}'
 if os.path.exists(path):
     shutil.rmtree(path)
@@ -478,6 +479,21 @@ _bridge_out = json.dumps(files)
   return JSON.parse(result);
 }
 
+export async function getAllPublicFiles() {
+  const result = await runPy(`
+import os, json
+public = '${getPublic()}'
+files = []
+for dirpath, dirnames, filenames in os.walk(public):
+    for fname in filenames:
+        full = os.path.join(dirpath, fname)
+        rel = os.path.relpath(full, public)
+        files.append(rel)
+_bridge_out = json.dumps(files)
+`);
+  return JSON.parse(result);
+}
+
 export function readWorkspaceFile(relativePath) {
   const pyodide = getPyodide();
   const fullPath = `${getPublic()}/${relativePath}`;
@@ -516,6 +532,31 @@ _bridge_out = buf.getvalue().decode()
 export async function renderSite({ includePwa = false } = {}) {
   // jinja2 + sqlite3 are only needed for rendering, loaded lazily
   await ensureRenderPackages();
+
+  if (includePwa) {
+    // Fetch PWA files from the web server into Pyodide FS so render can bundle them
+    const pyodide = getPyodide();
+    const pwaFiles = [
+      'index.html', 'manifest.json', 'sw.js',
+      'css/style.css', 'icons/icon.svg',
+      'js/app.js', 'js/coulomb-bridge.js', 'js/feed-renderer.js',
+      'js/fs-sync.js', 'js/identicon.js', 'js/pyodide-loader.js',
+      'js/storage/adapter.js', 'js/storage/github.js',
+    ];
+    const fetches = pwaFiles.map(f =>
+      fetch(f).then(r => r.ok ? r.text() : null).then(text => text && { path: f, text })
+    );
+    const results = await Promise.all(fetches);
+    for (const file of results) {
+      if (file) {
+        const fullPath = `/coulomb/pwa/${file.path}`;
+        const dir = fullPath.substring(0, fullPath.lastIndexOf('/'));
+        pyodide.FS.mkdirTree(dir);
+        pyodide.FS.writeFile(fullPath, file.text);
+      }
+    }
+  }
+
   await runPy(`
 import os, shutil, glob
 os.chdir('${getWorkspace()}')
@@ -589,6 +630,18 @@ for subdir in _copy_dirs:
         if os.path.exists(dst):
             shutil.rmtree(dst)
         shutil.copytree(src, dst)
+
+# Copy detail page HTML files from posts/ (without overwriting original CBOR data)
+for html_file in glob.glob(os.path.join(RENDER_ROOT, 'posts/**/*.html'), recursive=True):
+    rel = os.path.relpath(html_file, RENDER_ROOT)
+    dst = os.path.join('${getPublic()}', rel)
+    os.makedirs(os.path.dirname(dst), exist_ok=True)
+    shutil.copy(html_file, dst)
+
+# Create root index.html redirect to latest page
+_index = os.path.join('${getPublic()}', 'index.html')
+with open(_index, 'w') as f:
+    f.write('<!doctype html><meta http-equiv="refresh" content="0;url=pages/latest.html">')
 `);
 }
 

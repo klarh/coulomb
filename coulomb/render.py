@@ -13,6 +13,7 @@ import cbor2
 import jinja2
 
 from .cmd import register_subcommand
+from .index_walker import IndexWalker, load_index, parse_entry
 
 
 def _cubehelix_rgb(lam, s=0, r=1, h=1.2, gamma=1):
@@ -240,10 +241,10 @@ TEMPLATES = dict(
     </div>
     <nav class="pagination">
     {% if previous_page %}
-        <a href="{{ previous_page }}" class="page-btn">← Newer</a>
+        <a href="{{ previous_page }}" class="page-btn">← Older</a>
     {% endif %}
     {% if next_page %}
-        <a href="{{ next_page }}" class="page-btn">Older →</a>
+        <a href="{{ next_page }}" class="page-btn">Newer →</a>
     {% endif %}
     </nav>
 </body>
@@ -502,6 +503,7 @@ class BuildCache:
         self.hash_name = hash_name
         self.subdir = subdir
         self.connection = sqlite3.connect(filename)
+        self._walker = None
 
         self.init()
 
@@ -511,60 +513,13 @@ class BuildCache:
 
     def stale_check(self, directory):
         with self.connection as conn:
-            self.stale_check_(conn, directory)
+            walker = _BuildWalker(self, conn)
+            walker.walk(directory)
 
     def stale_check_(self, curs, directory):
-        recurse = True
-        query = self.Queries.select_stale_hash
-        index = os.path.join(directory, 'index.cbor')
-        reldir = os.path.relpath(directory, self.root)
-        with open(index, 'rb') as f:
-            index = cbor2.load(f)
-        for (last_hash,) in curs.execute(query, (reldir, self.hash_name)):
-            recurse = index['self_hashes'][self.hash_name] != last_hash
-
-        if recurse:
-            query = self.Queries.insert_stale_check
-            qval = (
-                reldir,
-                index['self_hashes'][self.hash_name],
-                self.hash_name,
-                EntryType.directory.value,
-                None,
-            )
-            curs.execute(query, qval)
-
-            for filename, hashval in index['child_hashes'][self.hash_name].items():
-                bits = filename.split('.')
-                if len(bits) < 3 or not filename.endswith('cbor'):
-                    continue
-                entry_type = bits[0]
-                if entry_type not in ('post', 'reply'):
-                    continue
-                timestamp = filename.split('.')[-2]
-                relpath = os.path.join(reldir, filename)
-                qval = (
-                    relpath,
-                    hashval,
-                    self.hash_name,
-                    EntryType[entry_type].value,
-                    timestamp,
-                )
-                curs.execute(query, qval)
-
-                path_parts = relpath.split('/')
-                if len(path_parts) >= 2 and path_parts[1].isalnum():
-                    entry_id = bits[1]
-                    curs.execute(
-                        self.Queries.insert_post_path,
-                        (path_parts[1], entry_id, relpath),
-                    )
-
-                if entry_type == 'reply':
-                    self.parse_reply(curs, relpath)
-
-            for subdir in index['dirnames']:
-                self.stale_check_(curs, os.path.join(directory, subdir))
+        """Legacy interface — delegates to IndexWalker."""
+        walker = _BuildWalker(self, curs)
+        walker.walk(directory)
 
     def parse_reply(self, curs, relpath):
         bits = relpath.split('/')
@@ -655,6 +610,90 @@ class BuildCache:
         self.connection.execute(self.Queries.insert_build_update)
         self.connection.execute(self.Queries.delete_after_update)
         self.connection.commit()
+
+
+class _BuildWalker(IndexWalker):
+    """IndexWalker that feeds BuildCache's pending_changes table."""
+
+    def __init__(self, cache, cursor):
+        super().__init__(cache.hash_name)
+        self.cache = cache
+        self.cursor = cursor
+
+    def get_index(self, path):
+        index_path = os.path.join(path, 'index.cbor')
+        return load_index(index_path)
+
+    def get_stored_hash(self, path):
+        reldir = os.path.relpath(path, self.cache.root)
+        for (last_hash,) in self.cursor.execute(
+            BuildCache.Queries.select_stale_hash, (reldir, self.hash_name)
+        ):
+            return last_hash
+        return None
+
+    def store_hash(self, path, hash_value):
+        # BuildCache stores hashes via pending_changes + update_built_files
+        pass
+
+    def on_directory(self, dirpath, index):
+        reldir = os.path.relpath(dirpath, self.cache.root)
+        self.cursor.execute(
+            BuildCache.Queries.insert_stale_check,
+            (reldir, index['self_hashes'][self.hash_name],
+             self.hash_name, EntryType.directory.value, None),
+        )
+
+    def on_entry(self, dirpath, entry, hashval):
+        reldir = os.path.relpath(dirpath, self.cache.root)
+        relpath = os.path.join(reldir, entry['filename'])
+        self.cursor.execute(
+            BuildCache.Queries.insert_stale_check,
+            (relpath, hashval, self.hash_name,
+             EntryType[entry['type']].value, entry['timestamp']),
+        )
+
+        path_parts = relpath.split('/')
+        if len(path_parts) >= 2 and path_parts[1].isalnum():
+            self.cursor.execute(
+                BuildCache.Queries.insert_post_path,
+                (path_parts[1], entry['id'], relpath),
+            )
+
+        if entry['type'] == 'reply':
+            self.cache.parse_reply(self.cursor, relpath)
+
+    def walk(self, directory):
+        """Walk starting from an absolute directory path."""
+        self._walk(directory)
+
+    def _walk(self, dirpath):
+        index_path = os.path.join(dirpath, 'index.cbor')
+        try:
+            index = load_index(index_path)
+        except FileNotFoundError:
+            return
+
+        reldir = os.path.relpath(dirpath, self.cache.root)
+        stored = None
+        for (last_hash,) in self.cursor.execute(
+            BuildCache.Queries.select_stale_hash, (reldir, self.hash_name)
+        ):
+            stored = last_hash
+
+        current = index['self_hashes'][self.hash_name]
+        if stored is not None and stored == current:
+            return
+
+        self.on_directory(dirpath, index)
+
+        for filename, hashval in index['child_hashes'][self.hash_name].items():
+            entry = parse_entry(filename)
+            if entry:
+                self.on_entry(dirpath, entry, hashval)
+
+        for subdir in index.get('dirnames', []):
+            self._walk(os.path.join(dirpath, subdir))
 
 
 def write_page_html(

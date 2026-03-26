@@ -6,6 +6,7 @@ from posixpath import join as urljoin
 import cbor2
 
 from .cmd import register_subcommand
+from .index_walker import IndexWalker, load_index_bytes, BaseQueries
 from .TimeArchive import TimeArchive
 
 
@@ -88,15 +89,17 @@ def _local_fetcher(location):
         return f.read()
 
 
-class PullCache:
+class PullCache(IndexWalker):
     def __init__(self, root, filename, hash_name, fetcher=None, change_log=None):
+        super().__init__(hash_name)
         self.root = root
         self.filename = filename
-        self.hash_name = hash_name
         self.connection = sqlite3.connect(filename)
         self._fetcher = fetcher or _url_fetcher
         self.change_log = change_log
         self.imported_count = 0
+        self._location = None
+        self._remote_id = None
 
         self.init()
 
@@ -111,73 +114,54 @@ class PullCache:
         if self.change_log:
             self.change_log.write(relpath + '\n')
 
+    # IndexWalker interface
+
+    def get_index(self, path):
+        index_bytes = self.get(urljoin(self._location, path, 'index.cbor'))
+        return load_index_bytes(index_bytes)
+
+    def get_stored_hash(self, path):
+        with self.connection as conn:
+            for (last_hash,) in conn.execute(
+                Queries.select_hash, (self._remote_id, path, self.hash_name)
+            ):
+                return last_hash
+        return None
+
+    def store_hash(self, path, hash_value):
+        with self.connection as conn:
+            conn.execute(Queries.insert_hash, (
+                self._remote_id, path, hash_value, self.hash_name
+            ))
+
+    def on_entry(self, dirpath, entry, hashval):
+        sub_filename = os.path.join(dirpath, entry['filename'])
+        if dirpath == '.':
+            sub_filename = entry['filename']
+        self._import_post(
+            self._location, self._remote_id, sub_filename, hashval,
+            entry['type'], entry['id']
+        )
+
+    def on_identity(self, dirpath, filename, hashval):
+        sub_filename = os.path.join(dirpath, filename)
+        if dirpath == '.':
+            sub_filename = filename
+        self._import_identity(
+            self._location, self._remote_id, sub_filename, hashval, dirpath
+        )
+
+    # Pull-specific logic
+
     def stale_check(self, location):
-        location_id = None
+        self._location = location
+        self._remote_id = None
         with self.connection as conn:
             conn.execute(Queries.insert_location, (location,))
             for (location_id,) in conn.execute(Queries.lookup_location, (location,)):
-                pass
+                self._remote_id = location_id
 
-        self._walk(location, location_id, '.')
-
-    def _walk(self, location, remote_id, remote_subdir):
-        recurse = True
-        index_bytes = self.get(urljoin(location, remote_subdir, 'index.cbor'))
-        index = cbor2.loads(index_bytes)
-
-        with self.connection as conn:
-            for (last_hash,) in conn.execute(
-                Queries.select_hash, (remote_id, remote_subdir, self.hash_name)
-            ):
-                recurse = index['self_hashes'][self.hash_name] != last_hash
-
-        if not recurse:
-            return
-
-        # Import post/reply entries and identity files from this directory
-        for filename, hashval in index['child_hashes'][self.hash_name].items():
-            bits = filename.split('.')
-            if not filename.endswith('cbor') or len(bits) < 3:
-                continue
-
-            entry_type = bits[0]
-            entry_id = bits[1]
-
-            if entry_type in ('post', 'reply'):
-                sub_filename = urljoin(remote_subdir, filename)
-                self._import_post(
-                    location, remote_id, sub_filename, hashval, entry_type, entry_id
-                )
-            elif entry_type == 'identity':
-                sub_filename = urljoin(remote_subdir, filename)
-                self._import_identity(
-                    location, remote_id, sub_filename, hashval, remote_subdir
-                )
-
-        # Also import latest.cbor in identity directories
-        if 'latest.cbor' in index.get('filenames', []):
-            latest_path = urljoin(remote_subdir, 'latest.cbor')
-            latest_hash = index['child_hashes'][self.hash_name].get('latest.cbor')
-            if latest_hash:
-                self._import_identity(
-                    location, remote_id, latest_path, latest_hash, remote_subdir
-                )
-
-        # Recurse into subdirectories
-        for subdir in index.get('dirnames', []):
-            if subdir == '.':
-                continue
-            self._walk(location, remote_id, urljoin(remote_subdir, subdir))
-
-        # Update cached hash for this directory
-        qval = (
-            remote_id,
-            remote_subdir,
-            index['self_hashes'][self.hash_name],
-            self.hash_name,
-        )
-        with self.connection as conn:
-            conn.execute(Queries.insert_hash, qval)
+        self.walk('.')
 
     def _import_post(self, location, remote_id, filename, hashval, entry_type, entry_id):
         with self.connection as conn:

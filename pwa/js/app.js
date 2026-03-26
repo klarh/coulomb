@@ -4,7 +4,7 @@ import {
   ensureWorkspace, isInitialized, initialize, getIdentityInfo,
   setDisplayName, setAvatarUrl, setIdentityConfig,
   addLocation, removeLocation,
-  createPost, listRecentPosts, getPendingFiles,
+  createPost, listRecentPosts, getPendingFiles, getAllPublicFiles,
   readWorkspaceFile, renderSite,
   getSiteConfig, setSiteConfig, generateQRCodeSVG,
   getActiveAccount, getWorkspacePath, listAccounts, createAccount, switchAccount, deleteAccount,
@@ -542,30 +542,34 @@ async function handlePublish() {
       await saveToIDB(pyodide, getWorkspacePath());
     }
 
-    const pendingPaths = await getPendingFiles();
-    if (pendingPaths.length === 0) {
+    // Collect all files from the public directory (includes rendered HTML,
+    // static assets, posts, identity — everything needed for the site)
+    showStatus(statusEl, 'Collecting files…', 'success');
+    const allPaths = await getAllPublicFiles();
+    if (allPaths.length === 0) {
       showStatus(statusEl, 'Nothing to publish', 'success');
       return;
     }
 
     // Read file contents from Pyodide FS
     const files = [];
-    for (const relPath of pendingPaths) {
+    for (const relPath of allPaths) {
       const content = readWorkspaceFile(relPath);
       if (content) {
         files.push({ path: relPath, content });
       }
     }
 
-    const result = await backend.publish(files, `coulomb: publish ${files.length} file(s)`);
+    const result = await backend.publish(files, `coulomb: publish`);
 
     if (result.success) {
       // Clear changelog after successful publish
       const pyodide = (await import('./pyodide-loader.js')).getPyodide();
-      await clearChangelog(pyodide);
+      await clearChangelog(pyodide, getWorkspacePath());
       await saveToIDB(pyodide, getWorkspacePath());
+      const skipped = result.skipped ? ` (${result.skipped} unchanged)` : '';
       showStatus(statusEl,
-        `Published ${result.filesPublished} file(s)! ${result.url ? `View at ${result.url}` : ''}`,
+        `Published ${result.filesPublished} file(s)${skipped}! ${result.url ? `View at ${result.url}` : ''}`,
         'success'
       );
     } else {
@@ -627,12 +631,11 @@ async function refreshSync() {
     const publishBtn = document.getElementById('btn-publish');
 
     if (pending.length > 0) {
-      pendingEl.textContent = `${pending.length} file(s) ready to publish`;
-      publishBtn.disabled = !backend.connected;
+      pendingEl.textContent = `${pending.length} file(s) changed since last publish`;
     } else {
-      pendingEl.textContent = 'No pending changes';
-      publishBtn.disabled = true;
+      pendingEl.textContent = 'No pending data changes';
     }
+    publishBtn.disabled = !backend.connected;
   } catch (e) {
     console.error('Failed to check pending files:', e);
   }
@@ -837,20 +840,29 @@ async function handleDeleteAccount(name) {
   try {
     const accounts = await listAccounts();
     const isActive = name === getActiveAccount();
-    if (isActive) {
-      const others = accounts.filter(a => a !== name);
-      const target = others.length > 0 ? others[0] : 'default';
-      if (others.length === 0) await createAccount('default');
-      await switchAccount(target);
+    const others = accounts.filter(a => a !== name);
+
+    if (isActive && others.length > 0) {
+      await switchAccount(others[0]);
       await restoreFromIDB(getPyodide(), getWorkspacePath());
       loadAndApplyTheme();
+      await deleteAccount(name);
+    } else if (isActive) {
+      // Last account: force-delete, then create a fresh default
+      await backend.disconnect();
+      await deleteAccount(name, { force: true });
+      await createAccount('default');
+      await switchAccount('default');
+    } else {
+      await deleteAccount(name);
     }
-    await deleteAccount(name);
+
     await deleteFromIDB(`/accounts/${name}`);
     localStorage.removeItem(`coulomb_theme_${name}`);
+    localStorage.removeItem(`coulomb_pull_sources_${name}`);
     closeSidebar();
     await refreshSidebar();
-    showView(isActive ? 'identity' : 'feed');
+    showView('identity');
     await refreshCurrentView();
   } catch (e) {
     alert(`Error: ${e.message}`);

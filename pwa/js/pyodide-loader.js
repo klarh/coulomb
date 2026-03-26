@@ -272,6 +272,7 @@ async function loadCoulombSource(pyodide) {
     'create_key.py',
     'identity.py',
     'pull.py',
+    'index_walker.py',
     'render.py',
     'rebuild_index.py',
     'verify.py',

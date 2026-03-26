@@ -145,7 +145,7 @@ export class GitHubPagesBackend extends StorageBackend {
 
   /**
    * Publish multiple files in a single git commit using the Git Data API.
-   * Much more efficient than individual file uploads.
+   * Only uploads files whose content has changed (compared via git blob SHA).
    */
   async publish(files, message = 'coulomb: publish') {
     if (!this.#connected) {
@@ -157,25 +157,65 @@ export class GitHubPagesBackend extends StorageBackend {
     }
 
     try {
-      // 1. Get the current commit SHA for the branch
+      // 1. Get the current commit SHA for the branch (may not exist yet)
+      let latestCommitSha = null;
+      let baseTreeSha = null;
+
       const refResp = await this.#api(
         `/repos/${this.#owner}/${this.#repo}/git/ref/heads/${this.#branch}`
       );
-      if (!refResp.ok) throw new Error('Failed to get branch ref');
-      const refData = await refResp.json();
-      const latestCommitSha = refData.object.sha;
+      if (refResp.ok) {
+        const refData = await refResp.json();
+        latestCommitSha = refData.object.sha;
 
-      // 2. Get the tree SHA from the latest commit
-      const commitResp = await this.#api(
-        `/repos/${this.#owner}/${this.#repo}/git/commits/${latestCommitSha}`
-      );
-      if (!commitResp.ok) throw new Error('Failed to get commit');
-      const commitData = await commitResp.json();
-      const baseTreeSha = commitData.tree.sha;
+        // 2. Get the tree SHA from the latest commit
+        const commitResp = await this.#api(
+          `/repos/${this.#owner}/${this.#repo}/git/commits/${latestCommitSha}`
+        );
+        if (!commitResp.ok) throw new Error('Failed to get commit');
+        const commitData = await commitResp.json();
+        baseTreeSha = commitData.tree.sha;
+      } else {
+        await this.#bootstrap();
+        const retry = await this.#api(
+          `/repos/${this.#owner}/${this.#repo}/git/ref/heads/${this.#branch}`
+        );
+        if (!retry.ok) throw new Error('Failed to initialize repository');
+        const retryData = await retry.json();
+        latestCommitSha = retryData.object.sha;
 
-      // 3. Create blobs for each file
-      const treeEntries = [];
+        const commitResp = await this.#api(
+          `/repos/${this.#owner}/${this.#repo}/git/commits/${latestCommitSha}`
+        );
+        if (!commitResp.ok) throw new Error('Failed to get commit');
+        const commitData = await commitResp.json();
+        baseTreeSha = commitData.tree.sha;
+      }
+
+      // 3. Fetch existing tree to find unchanged files
+      const existingShas = await this.#getTreeShas(baseTreeSha);
+
+      // 4. Filter to only changed files by comparing git blob SHAs
+      const changedFiles = [];
       for (const file of files) {
+        const fullPath = this.#pathPrefix + file.path;
+        const localSha = await gitBlobSha(file.content);
+        if (existingShas.get(fullPath) === localSha) continue;
+        changedFiles.push(file);
+      }
+
+      if (changedFiles.length === 0) {
+        return {
+          success: true,
+          url: this.#pagesUrl(),
+          filesPublished: 0,
+          skipped: files.length,
+        };
+      }
+
+      // 5. Create blobs only for changed files
+      const treeEntries = [];
+      for (const file of changedFiles) {
         const blobResp = await this.#api(
           `/repos/${this.#owner}/${this.#repo}/git/blobs`,
           {
@@ -186,7 +226,10 @@ export class GitHubPagesBackend extends StorageBackend {
             }),
           }
         );
-        if (!blobResp.ok) throw new Error(`Failed to create blob for ${file.path}`);
+        if (!blobResp.ok) {
+          const err = await blobResp.json().catch(() => ({}));
+          throw new Error(`Failed to create blob for ${file.path}: ${err.message || blobResp.status}`);
+        }
         const blobData = await blobResp.json();
 
         treeEntries.push({
@@ -197,27 +240,24 @@ export class GitHubPagesBackend extends StorageBackend {
         });
       }
 
-      // 4. Create a new tree
+      // 6. Create a new tree
       const treeResp = await this.#api(
         `/repos/${this.#owner}/${this.#repo}/git/trees`,
         {
           method: 'POST',
-          body: JSON.stringify({
-            base_tree: baseTreeSha,
-            tree: treeEntries,
-          }),
+          body: JSON.stringify({ base_tree: baseTreeSha, tree: treeEntries }),
         }
       );
       if (!treeResp.ok) throw new Error('Failed to create tree');
       const treeData = await treeResp.json();
 
-      // 5. Create a new commit
+      // 7. Create a new commit
       const newCommitResp = await this.#api(
         `/repos/${this.#owner}/${this.#repo}/git/commits`,
         {
           method: 'POST',
           body: JSON.stringify({
-            message,
+            message: `${message} (${changedFiles.length}/${files.length} changed)`,
             tree: treeData.sha,
             parents: [latestCommitSha],
           }),
@@ -226,21 +266,28 @@ export class GitHubPagesBackend extends StorageBackend {
       if (!newCommitResp.ok) throw new Error('Failed to create commit');
       const newCommitData = await newCommitResp.json();
 
-      // 6. Update the branch ref
+      // 8. Update the branch ref
       const updateRefResp = await this.#api(
         `/repos/${this.#owner}/${this.#repo}/git/refs/heads/${this.#branch}`,
         {
           method: 'PATCH',
-          body: JSON.stringify({ sha: newCommitData.sha }),
+          body: JSON.stringify({ sha: newCommitData.sha, force: true }),
         }
       );
-      if (!updateRefResp.ok) throw new Error('Failed to update ref');
+      if (!updateRefResp.ok) {
+        const err = await updateRefResp.json().catch(() => ({}));
+        throw new Error(`Failed to update ref: ${err.message || updateRefResp.status}`);
+      }
+
+      // Ensure GitHub Pages is enabled for this branch
+      await this.#ensurePages();
 
       return {
         success: true,
         url: this.#pagesUrl(),
         commitSha: newCommitData.sha,
-        filesPublished: files.length,
+        filesPublished: changedFiles.length,
+        skipped: files.length - changedFiles.length,
       };
     } catch (e) {
       return { success: false, error: e.message };
@@ -275,6 +322,61 @@ export class GitHubPagesBackend extends StorageBackend {
 
   #pagesUrl() {
     return `https://${this.#owner}.github.io/${this.#repo}/`;
+  }
+
+  // Bootstrap an empty repo by creating .nojekyll via the Contents API,
+  // which works on uninitialized repos (the Git Data API does not).
+  async #bootstrap() {
+    const path = this.#pathPrefix + '.nojekyll';
+    const resp = await this.#api(
+      `/repos/${this.#owner}/${this.#repo}/contents/${path}`,
+      {
+        method: 'PUT',
+        body: JSON.stringify({
+          message: 'coulomb: initialize repository',
+          content: '',
+          branch: this.#branch,
+        }),
+      }
+    );
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(`Failed to initialize repository: ${err.message || resp.status}`);
+    }
+  }
+
+  // Enable GitHub Pages if not already enabled. Silently ignored if the
+  // token lacks pages permission or Pages is already configured.
+  async #ensurePages() {
+    try {
+      const check = await this.#api(`/repos/${this.#owner}/${this.#repo}/pages`);
+      if (check.ok) return; // already enabled
+
+      await this.#api(`/repos/${this.#owner}/${this.#repo}/pages`, {
+        method: 'POST',
+        body: JSON.stringify({
+          source: { branch: this.#branch, path: '/' },
+        }),
+      });
+    } catch { /* best-effort */ }
+  }
+
+  // Fetch the full recursive tree and return a Map of path → blob SHA.
+  async #getTreeShas(treeSha) {
+    const shas = new Map();
+    const resp = await this.#api(
+      `/repos/${this.#owner}/${this.#repo}/git/trees/${treeSha}?recursive=1`
+    );
+    if (!resp.ok) return shas;
+    const data = await resp.json();
+    if (data.tree) {
+      for (const entry of data.tree) {
+        if (entry.type === 'blob') {
+          shas.set(entry.path, entry.sha);
+        }
+      }
+    }
+    return shas;
   }
 
   async #api(path, options = {}) {
@@ -336,4 +438,19 @@ function base64ToUint8(base64) {
     bytes[i] = binary.charCodeAt(i);
   }
   return bytes;
+}
+
+/**
+ * Compute the git blob SHA-1 for a Uint8Array.
+ * Git hashes: SHA-1("blob {size}\0{content}")
+ */
+async function gitBlobSha(content) {
+  const header = new TextEncoder().encode(`blob ${content.length}\0`);
+  const combined = new Uint8Array(header.length + content.length);
+  combined.set(header);
+  combined.set(content, header.length);
+  const hash = await crypto.subtle.digest('SHA-1', combined);
+  return Array.from(new Uint8Array(hash))
+    .map(b => b.toString(16).padStart(2, '0'))
+    .join('');
 }
