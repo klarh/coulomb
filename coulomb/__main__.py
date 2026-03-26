@@ -2,6 +2,7 @@ import argparse
 import importlib
 
 from . import cmd
+from . import config
 from . import create_key
 from . import identity
 from . import init

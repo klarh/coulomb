@@ -153,6 +153,8 @@ function bindEvents() {
   document.getElementById('btn-save-site-config').addEventListener('click', handleSaveSiteConfig);
 
   // Sync
+  document.getElementById('btn-github-lookup').addEventListener('click', handleGitHubLookup);
+  document.getElementById('btn-github-create-repo').addEventListener('click', handleGitHubCreateRepo);
   document.getElementById('btn-github-connect').addEventListener('click', handleGitHubConnect);
   document.getElementById('btn-github-disconnect').addEventListener('click', handleGitHubDisconnect);
   document.getElementById('btn-publish').addEventListener('click', handlePublish);
@@ -502,6 +504,70 @@ async function refreshIdentity() {
 }
 
 // ── Sync ──
+async function handleGitHubLookup() {
+  const token = document.getElementById('github-token').value.trim();
+  const statusEl = document.getElementById('github-auth-status');
+  if (!token) {
+    showStatus(statusEl, 'Enter a token first', 'error');
+    return;
+  }
+
+  const btn = document.getElementById('btn-github-lookup');
+  btn.disabled = true;
+  btn.textContent = 'Looking up…';
+
+  try {
+    const username = await backend.fetchUser(token);
+    if (username) {
+      // Pre-fill repo field with username/feed
+      const repoInput = document.getElementById('github-repo');
+      if (!repoInput.value) {
+        repoInput.value = `${username}/${username}.github.io`;
+      }
+      // Update "create on GitHub" link with pre-filled name
+      const createLink = document.getElementById('github-create-repo-link');
+      createLink.href = `https://github.com/new?name=${encodeURIComponent(username + '.github.io')}&description=${encodeURIComponent('My Coulomb feed')}`;
+      showStatus(statusEl, `Token valid — GitHub user: ${username}`, 'success');
+    } else {
+      showStatus(statusEl, 'Invalid token or API error', 'error');
+    }
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Look Up Username';
+  }
+}
+
+async function handleGitHubCreateRepo() {
+  const token = document.getElementById('github-token').value.trim();
+  const statusEl = document.getElementById('github-auth-status');
+  if (!token) {
+    showStatus(statusEl, 'Enter a token first (step 1)', 'error');
+    return;
+  }
+
+  const username = await backend.fetchUser(token);
+  if (!username) {
+    showStatus(statusEl, 'Invalid token', 'error');
+    return;
+  }
+
+  const repoName = `${username}.github.io`;
+  showStatus(statusEl, `Creating ${username}/${repoName}…`, 'success');
+
+  const result = await backend.createRepo(token, repoName, 'My Coulomb feed');
+  if (result.success) {
+    document.getElementById('github-repo').value = result.full_name;
+    showStatus(statusEl, `Created ${result.full_name}!`, 'success');
+  } else {
+    if (result.error && result.error.includes('already exists')) {
+      document.getElementById('github-repo').value = `${username}/${repoName}`;
+      showStatus(statusEl, `${username}/${repoName} already exists — using it`, 'success');
+    } else {
+      showStatus(statusEl, `Failed to create repo: ${result.error}`, 'error');
+    }
+  }
+}
+
 async function handleGitHubConnect() {
   const token = document.getElementById('github-token').value.trim();
   const repo = document.getElementById('github-repo').value.trim();
@@ -513,6 +579,23 @@ async function handleGitHubConnect() {
   const result = await backend.connect({ token, repo, branch, pathPrefix });
   if (result.success) {
     backend.saveToken(token);
+
+    // Check permissions and show warnings
+    const perms = await backend.checkPermissions();
+    const permEl = document.getElementById('github-permissions-status');
+    if (perms) {
+      const warnings = [];
+      if (!perms.contents) warnings.push('Contents');
+      if (!perms.pages) warnings.push('Pages');
+      if (warnings.length > 0) {
+        permEl.innerHTML = `⚠️ Token may lack <strong>${warnings.join(', ')}</strong> permission(s)`;
+        permEl.style.color = 'var(--accent, #e94560)';
+      } else {
+        permEl.textContent = '✓ Token permissions OK';
+        permEl.style.color = 'var(--text-muted)';
+      }
+    }
+
     showStatus(statusEl, 'Connected!', 'success');
     await refreshSync();
   } else {
@@ -531,6 +614,8 @@ async function handlePublish() {
 
   btn.disabled = true;
   btn.textContent = 'Publishing…';
+  // Remove stale location prompt from prior publish
+  document.getElementById('add-location-prompt')?.remove();
 
   try {
     // Render static site before publishing so pages are up to date
@@ -572,6 +657,28 @@ async function handlePublish() {
         `Published ${result.filesPublished} file(s)${skipped}! ${result.url ? `View at ${result.url}` : ''}`,
         'success'
       );
+
+      // Offer to add Pages URL as a federation location if not already present
+      if (result.url) {
+        try {
+          const info = await getIdentityInfo();
+          if (info && !info.locations.some(loc => loc.startsWith(result.url))) {
+            const pagesUrl = result.url + 'public';
+            statusEl.insertAdjacentHTML('afterend',
+              `<div id="add-location-prompt" class="status-msg" style="margin-top:0.5rem">
+                <span>Add <strong>${pagesUrl}</strong> as a published location?</span>
+                <button id="btn-add-pages-location" class="secondary-btn" style="margin-left:0.5rem">Add</button>
+              </div>`
+            );
+            document.getElementById('btn-add-pages-location').addEventListener('click', async (e) => {
+              e.target.disabled = true;
+              await addLocation(pagesUrl);
+              document.getElementById('add-location-prompt').textContent = '✓ Location added!';
+              await saveToIDB((await import('./pyodide-loader.js')).getPyodide(), getWorkspacePath());
+            });
+          }
+        } catch { /* non-critical */ }
+      }
     } else {
       showStatus(statusEl, `Publish failed: ${result.error}`, 'error');
     }

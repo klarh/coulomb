@@ -157,15 +157,40 @@
           <h3>GitHub Pages</h3>
           <div id="github-auth-status"></div>
           <div id="github-not-connected">
-            <p>Connect to a GitHub repository to publish your posts.</p>
-            <label for="github-token">Personal Access Token</label>
-            <input type="password" id="github-token" placeholder="ghp_...">
-            <label for="github-repo">Repository (owner/repo)</label>
-            <input type="text" id="github-repo" placeholder="username/username.github.io">
-            <label for="github-branch">Branch</label>
-            <input type="text" id="github-branch" placeholder="main" value="main">
-            <label for="github-path-prefix">Path Prefix (optional)</label>
-            <input type="text" id="github-path-prefix" placeholder="e.g. blog/">
+            <div class="setup-steps">
+              <div class="setup-step">
+                <span class="step-number">1</span>
+                <div class="step-content">
+                  <label for="github-token">Paste a Personal Access Token</label>
+                  <input type="password" id="github-token" placeholder="github_pat_...">
+                  <p class="help-text">
+                    <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">Create a fine-grained token →</a>
+                    <br>Required permissions: <strong>Contents</strong> (Read &amp; write), <strong>Pages</strong> (Read &amp; write)
+                  </p>
+                  <button id="btn-github-lookup" class="secondary-btn">Look Up Username</button>
+                </div>
+              </div>
+              <div class="setup-step">
+                <span class="step-number">2</span>
+                <div class="step-content">
+                  <label for="github-repo">Repository (owner/repo)</label>
+                  <input type="text" id="github-repo" placeholder="username/my-feed">
+                  <p class="help-text">
+                    <a id="github-create-repo-link" href="https://github.com/new" target="_blank" rel="noopener">Create a repository on GitHub →</a>
+                    or <button id="btn-github-create-repo" class="link-btn">create one now</button>
+                  </p>
+                </div>
+              </div>
+              <div class="setup-step">
+                <span class="step-number">3</span>
+                <div class="step-content">
+                  <label for="github-branch">Branch</label>
+                  <input type="text" id="github-branch" placeholder="main" value="main">
+                  <label for="github-path-prefix">Path Prefix (optional)</label>
+                  <input type="text" id="github-path-prefix" placeholder="e.g. blog/">
+                </div>
+              </div>
+            </div>
             <button id="btn-github-connect" class="primary-btn">Connect</button>
           </div>
           <div id="github-connected" class="hidden">

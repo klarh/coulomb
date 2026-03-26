@@ -559,17 +559,40 @@ os.chdir('${getWorkspace()}')
 
 import cbor2
 _bridge_out = '{}'
-identity_files = glob.glob('${getPublic()}/identity/*/latest.cbor')
-if identity_files:
-    with open(identity_files[0], 'rb') as f:
+config_files = glob.glob('${getPublic()}/config/*/latest.cbor')
+if config_files:
+    with open(config_files[0], 'rb') as f:
         entry = cbor2.load(f)
-    _bridge_out = json.dumps(entry['content']['author'].get('config', {}))
+    _bridge_out = json.dumps(entry['content'].get('config', {}))
 `);
   return JSON.parse(result);
 }
 
 export async function setSiteConfig(key, value) {
-  return setIdentityConfig([[key, value]]);
+  await runPy(`
+import os, glob
+os.chdir('${getWorkspace()}')
+
+identity_files = glob.glob('${getPublic()}/identity/*/latest.cbor')
+if not identity_files:
+    raise RuntimeError("No identity found. Run init first.")
+
+import cbor2
+with open(identity_files[0], 'rb') as f:
+    entry = cbor2.load(f)
+key_id = entry['content']['author']['id']
+
+private_key_files = glob.glob('${getPrivate()}/private_identity.*.cbor') + glob.glob('${getPrivate()}/signing.*.cbor')
+
+from coulomb.config import main as config_main
+config_main(
+    identity='${getPublic()}/identity/' + key_id,
+    change_log='${getChangelog()}',
+    signatures=private_key_files,
+    text=[[${JSON.stringify(key)}, ${JSON.stringify(value)}]],
+    delete=[],
+)
+`);
 }
 
 export async function getPendingFiles() {
@@ -737,6 +760,16 @@ for subdir in _copy_dirs:
         if os.path.exists(dst):
             shutil.rmtree(dst)
         shutil.copytree(src, dst)
+
+# When bundling PWA, also copy Python source and template so the
+# published site can bootstrap Pyodide (pyodide-loader.js fetches ../coulomb/)
+if _pwa_dir:
+    for src_dir, dst_name in [('/coulomb/coulomb', 'coulomb'), ('/coulomb/template', 'template')]:
+        if os.path.isdir(src_dir):
+            dst = os.path.join('${getPublic()}', dst_name)
+            if os.path.exists(dst):
+                shutil.rmtree(dst)
+            shutil.copytree(src_dir, dst, ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
 
 # Copy detail page HTML files from posts/ (without overwriting original CBOR data)
 for html_file in glob.glob(os.path.join(RENDER_ROOT, 'posts/**/*.html'), recursive=True):

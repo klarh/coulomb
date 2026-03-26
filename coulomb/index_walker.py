@@ -14,16 +14,20 @@ import cbor2
 class BaseQueries:
     """Minimal SQL for hash caching — subclasses extend with their own tables."""
 
-    create_hash_cache = ' '.join([
-        'CREATE TABLE IF NOT EXISTS hash_cache (',
-        'source_id INTEGER, path TEXT, hash BLOB, hash_name TEXT,',
-        'UNIQUE(source_id, path) ON CONFLICT REPLACE)',
-    ])
+    create_hash_cache = ' '.join(
+        [
+            'CREATE TABLE IF NOT EXISTS hash_cache (',
+            'source_id INTEGER, path TEXT, hash BLOB, hash_name TEXT,',
+            'UNIQUE(source_id, path) ON CONFLICT REPLACE)',
+        ]
+    )
 
-    select_hash = ' '.join([
-        'SELECT hash FROM hash_cache',
-        'WHERE source_id = ? AND path = ? AND hash_name = ?',
-    ])
+    select_hash = ' '.join(
+        [
+            'SELECT hash FROM hash_cache',
+            'WHERE source_id = ? AND path = ? AND hash_name = ?',
+        ]
+    )
 
     insert_hash = 'INSERT INTO hash_cache VALUES (?, ?, ?, ?)'
 

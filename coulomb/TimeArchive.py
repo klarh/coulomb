@@ -58,3 +58,8 @@ class UserPostArchive(TimeArchive):
 class IdentityArchive(TimeArchive):
     ENTRY_FORMAT = 'identity.{id}.cbor'
     PREFIX = 'identity'
+
+
+class ConfigArchive(TimeArchive):
+    ENTRY_FORMAT = 'config.{id}.cbor'
+    PREFIX = 'config'

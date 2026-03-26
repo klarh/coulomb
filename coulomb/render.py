@@ -26,7 +26,7 @@ def _cubehelix_rgb(lam, s=0, r=1, h=1.2, gamma=1):
     See Green 2011: http://adsabs.harvard.edu/abs/2011BASI...39..289G
     """
     lam = max(0.0, min(1.0, lam))
-    lam_g = lam ** gamma
+    lam_g = lam**gamma
     phi = 2 * math.pi * (s / 3 + r * lam)
     a = h * lam_g * (1 - lam_g) * 0.5
     cos_phi = math.cos(phi)
@@ -65,8 +65,9 @@ def generate_identicon_svg(id_string, size=80):
 
     # Ring lambdas spread across the cubehelix — each gets a different
     # lightness AND hue due to the helical path through RGB space
-    ring_lambdas = [0.35 + 0.25 * ring / max(num_rings - 1, 1)
-                    for ring in range(num_rings)]
+    ring_lambdas = [
+        0.35 + 0.25 * ring / max(num_rings - 1, 1) for ring in range(num_rings)
+    ]
 
     # Draw outermost ring first so inner rings layer on top,
     # revealing each ring's distinct cubehelix color
@@ -106,6 +107,7 @@ def generate_identicon_svg(id_string, size=80):
 def identicon_data_uri(id_string, size=80):
     """Return an identicon as a data: URI for use in img src."""
     import base64
+
     svg = generate_identicon_svg(id_string, size)
     b64 = base64.b64encode(svg.encode()).decode()
     return f'data:image/svg+xml;base64,{b64}'
@@ -640,8 +642,13 @@ class _BuildWalker(IndexWalker):
         reldir = os.path.relpath(dirpath, self.cache.root)
         self.cursor.execute(
             BuildCache.Queries.insert_stale_check,
-            (reldir, index['self_hashes'][self.hash_name],
-             self.hash_name, EntryType.directory.value, None),
+            (
+                reldir,
+                index['self_hashes'][self.hash_name],
+                self.hash_name,
+                EntryType.directory.value,
+                None,
+            ),
         )
 
     def on_entry(self, dirpath, entry, hashval):
@@ -649,8 +656,13 @@ class _BuildWalker(IndexWalker):
         relpath = os.path.join(reldir, entry['filename'])
         self.cursor.execute(
             BuildCache.Queries.insert_stale_check,
-            (relpath, hashval, self.hash_name,
-             EntryType[entry['type']].value, entry['timestamp']),
+            (
+                relpath,
+                hashval,
+                self.hash_name,
+                EntryType[entry['type']].value,
+                entry['timestamp'],
+            ),
         )
 
         path_parts = relpath.split('/')
@@ -793,21 +805,28 @@ def write_page_html(
         change_log.write('{}\n'.format(os.path.relpath(target_filename, root)))
 
 
-def _load_identity_config(root):
-    """Load text config from the local identity's author.config."""
-    identity_dir = os.path.join(root, 'identity')
-    # Find the first identity subdirectory
-    for name in os.listdir(identity_dir):
-        latest = os.path.join(identity_dir, name, 'latest.cbor')
+def _load_repo_config(root):
+    """Load config from config/*/latest.cbor in the repo."""
+    config_dir = os.path.join(root, 'config')
+    for name in os.listdir(config_dir):
+        latest = os.path.join(config_dir, name, 'latest.cbor')
         if os.path.isfile(latest):
             with open(latest, 'rb') as f:
                 entry = cbor2.load(f)
-            return entry['content']['author'].get('config', {})
-    raise FileNotFoundError('No identity found')
+            return entry['content'].get('config', {})
+    raise FileNotFoundError('No config found')
 
 
-def main(root, cache_file, hash_name, template_dir, change_log, post_dirs, html_dir,
-         pwa_dir=None):
+def main(
+    root,
+    cache_file,
+    hash_name,
+    template_dir,
+    change_log,
+    post_dirs,
+    html_dir,
+    pwa_dir=None,
+):
     env = jinja2.Environment()
     env.filters['identicon'] = identicon_data_uri
     templates = {}
@@ -819,8 +838,8 @@ def main(root, cache_file, hash_name, template_dir, change_log, post_dirs, html_
             templates[k] = env.from_string(v)
 
     try:
-        text_config = _load_identity_config(root)
-    except (FileNotFoundError, KeyError, StopIteration):
+        text_config = _load_repo_config(root)
+    except (FileNotFoundError, KeyError, StopIteration, OSError):
         text_config = {}
 
     cache = BuildCache(root, cache_file, hash_name, html_dir)

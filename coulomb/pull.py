@@ -80,6 +80,7 @@ class Queries:
 
 def _url_fetcher(location):
     import urllib.request
+
     with urllib.request.urlopen(location) as f:
         return f.read()
 
@@ -130,17 +131,21 @@ class PullCache(IndexWalker):
 
     def store_hash(self, path, hash_value):
         with self.connection as conn:
-            conn.execute(Queries.insert_hash, (
-                self._remote_id, path, hash_value, self.hash_name
-            ))
+            conn.execute(
+                Queries.insert_hash, (self._remote_id, path, hash_value, self.hash_name)
+            )
 
     def on_entry(self, dirpath, entry, hashval):
         sub_filename = os.path.join(dirpath, entry['filename'])
         if dirpath == '.':
             sub_filename = entry['filename']
         self._import_post(
-            self._location, self._remote_id, sub_filename, hashval,
-            entry['type'], entry['id']
+            self._location,
+            self._remote_id,
+            sub_filename,
+            hashval,
+            entry['type'],
+            entry['id'],
         )
 
     def on_identity(self, dirpath, filename, hashval):
@@ -163,7 +168,9 @@ class PullCache(IndexWalker):
 
         self.walk('.')
 
-    def _import_post(self, location, remote_id, filename, hashval, entry_type, entry_id):
+    def _import_post(
+        self, location, remote_id, filename, hashval, entry_type, entry_id
+    ):
         with self.connection as conn:
             last_hash = None
             for (last_hash,) in conn.execute(
@@ -184,9 +191,9 @@ class PullCache(IndexWalker):
                 )
 
             # Update hash after successful import
-            conn.execute(Queries.insert_hash, (
-                remote_id, filename, hashval, self.hash_name
-            ))
+            conn.execute(
+                Queries.insert_hash, (remote_id, filename, hashval, self.hash_name)
+            )
 
     def _remap_post(self, conn, remote_id, location, filename, entry_type, entry_id):
         archive_kwargs = dict(prefix='posts')
@@ -255,9 +262,9 @@ class PullCache(IndexWalker):
         self.imported_count += 1
 
         with self.connection as conn:
-            conn.execute(Queries.insert_hash, (
-                remote_id, filename, hashval, self.hash_name
-            ))
+            conn.execute(
+                Queries.insert_hash, (remote_id, filename, hashval, self.hash_name)
+            )
 
 
 def main(root, cache_file, sources, hash_name, change_log, fetcher=None):
@@ -270,8 +277,7 @@ def main(root, cache_file, sources, hash_name, change_log, fetcher=None):
         change_log_fh = change_log
 
     cache = PullCache(
-        root, cache_file, hash_name,
-        fetcher=fetcher, change_log=change_log_fh
+        root, cache_file, hash_name, fetcher=fetcher, change_log=change_log_fh
     )
 
     try:

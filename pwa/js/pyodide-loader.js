@@ -267,6 +267,7 @@ async function loadCoulombSource(pyodide) {
     '__init__.py',
     '__main__.py',
     'cmd.py',
+    'config.py',
     'init.py',
     'post.py',
     'create_key.py',

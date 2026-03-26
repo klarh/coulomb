@@ -153,7 +153,7 @@ export class GitHubPagesBackend extends StorageBackend {
     }
 
     if (files.length === 0) {
-      return { success: true, url: this.#pagesUrl() };
+      return { success: true, url: this.pagesUrl };
     }
 
     try {
@@ -207,7 +207,7 @@ export class GitHubPagesBackend extends StorageBackend {
       if (changedFiles.length === 0) {
         return {
           success: true,
-          url: this.#pagesUrl(),
+          url: this.pagesUrl,
           filesPublished: 0,
           skipped: files.length,
         };
@@ -284,7 +284,7 @@ export class GitHubPagesBackend extends StorageBackend {
 
       return {
         success: true,
-        url: this.#pagesUrl(),
+        url: this.pagesUrl,
         commitSha: newCommitData.sha,
         filesPublished: changedFiles.length,
         skipped: files.length - changedFiles.length,
@@ -320,8 +320,62 @@ export class GitHubPagesBackend extends StorageBackend {
     return `${this.#owner}/${this.#repo} (${this.#branch})`;
   }
 
-  #pagesUrl() {
+  get pagesUrl() {
     return `https://${this.#owner}.github.io/${this.#repo}/`;
+  }
+
+  // Fetch the authenticated user's login name.
+  async fetchUser(token) {
+    const resp = await fetch(`${GITHUB_API}/user`, {
+      headers: {
+        'Accept': 'application/vnd.github.v3+json',
+        'Authorization': `Bearer ${token}`,
+      },
+    });
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    return data.login;
+  }
+
+  // Create a new repository for the authenticated user.
+  async createRepo(token, name, description = '') {
+    const resp = await fetch(`${GITHUB_API}/user/repos`, {
+      method: 'POST',
+      headers: {
+        'Accept': 'application/vnd.github.v3+json',
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ name, description, auto_init: false }),
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      return { success: false, error: err.message || resp.status };
+    }
+    const data = await resp.json();
+    return { success: true, full_name: data.full_name };
+  }
+
+  // Check token permissions by probing key API endpoints.
+  async checkPermissions() {
+    if (!this.#connected) return null;
+    const checks = {};
+
+    // Contents (needed for bootstrap + file operations)
+    const contentsResp = await this.#api(
+      `/repos/${this.#owner}/${this.#repo}/contents/.nojekyll?ref=${this.#branch}`
+    );
+    checks.contents = contentsResp.ok || contentsResp.status === 404;
+
+    // Pages
+    try {
+      const pagesResp = await this.#api(`/repos/${this.#owner}/${this.#repo}/pages`);
+      checks.pages = pagesResp.ok || pagesResp.status === 404;
+    } catch {
+      checks.pages = false;
+    }
+
+    return checks;
   }
 
   // Bootstrap an empty repo by creating .nojekyll via the Contents API,
