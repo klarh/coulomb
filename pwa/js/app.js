@@ -98,6 +98,9 @@ for item in os.listdir(old):
       console.log(`Restored ${restored} files from IndexedDB`);
     }
 
+    // Migrate any old global GitHub config to the active account
+    GitHubPagesBackend.migrateGlobalConfig(getActiveAccount());
+    backend.setAccountScope(getActiveAccount());
     backend.tryRestore();
 
     // Apply saved theme for active account
@@ -926,6 +929,9 @@ async function handleSwitchAccount(name) {
     await saveToIDB(pyodide, getWorkspacePath());
     await switchAccount(name);
     await restoreFromIDB(getPyodide(), getWorkspacePath());
+    // Reset GitHub backend to the new account's config
+    backend.setAccountScope(name);
+    backend.tryRestore();
     loadAndApplyTheme();
     closeSidebar();
     await refreshSidebar();
@@ -952,6 +958,8 @@ async function handleDeleteAccount(name) {
     if (isActive && others.length > 0) {
       await switchAccount(others[0]);
       await restoreFromIDB(getPyodide(), getWorkspacePath());
+      backend.setAccountScope(others[0]);
+      backend.tryRestore();
       loadAndApplyTheme();
       await deleteAccount(name);
     } else if (isActive) {
@@ -960,6 +968,8 @@ async function handleDeleteAccount(name) {
       await deleteAccount(name, { force: true });
       await createAccount('default');
       await switchAccount('default');
+      backend.setAccountScope('default');
+      backend.tryRestore();
     } else {
       await deleteAccount(name);
     }
@@ -967,6 +977,7 @@ async function handleDeleteAccount(name) {
     await deleteFromIDB(`/accounts/${name}`);
     localStorage.removeItem(`coulomb_theme_${name}`);
     localStorage.removeItem(`coulomb_pull_sources_${name}`);
+    GitHubPagesBackend.removeAccountConfig(name);
     closeSidebar();
     await refreshSidebar();
     showView('identity');
