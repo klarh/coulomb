@@ -115,7 +115,7 @@ def rm_key(identity, change_log, signatures, key_ids):
 
     signing_keys = set(author.get('signing_keys', []))
     encryption_keys = set(author.get('encryption_keys', []))
-    for key in key_files:
+    for key in key_ids:
         signing_keys.discard(key)
         encryption_keys.discard(key)
 

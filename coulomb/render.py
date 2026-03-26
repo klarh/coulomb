@@ -793,6 +793,19 @@ def write_page_html(
         change_log.write('{}\n'.format(os.path.relpath(target_filename, root)))
 
 
+def _load_identity_config(root):
+    """Load text config from the local identity's author.config."""
+    identity_dir = os.path.join(root, 'identity')
+    # Find the first identity subdirectory
+    for name in os.listdir(identity_dir):
+        latest = os.path.join(identity_dir, name, 'latest.cbor')
+        if os.path.isfile(latest):
+            with open(latest, 'rb') as f:
+                entry = cbor2.load(f)
+            return entry['content']['author'].get('config', {})
+    raise FileNotFoundError('No identity found')
+
+
 def main(root, cache_file, hash_name, template_dir, change_log, post_dirs, html_dir,
          pwa_dir=None):
     env = jinja2.Environment()
@@ -806,10 +819,8 @@ def main(root, cache_file, hash_name, template_dir, change_log, post_dirs, html_
             templates[k] = env.from_string(v)
 
     try:
-        with open(os.path.join(root, 'config.cbor'), 'rb') as f:
-            config = cbor2.load(f).get('config', {})
-            text_config = config['text_values']
-    except FileNotFoundError:
+        text_config = _load_identity_config(root)
+    except (FileNotFoundError, KeyError, StopIteration):
         text_config = {}
 
     cache = BuildCache(root, cache_file, hash_name, html_dir)

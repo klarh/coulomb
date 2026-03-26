@@ -227,6 +227,132 @@ export async function setAvatarUrl(url) {
   return setIdentityConfig([['avatar_url', url]]);
 }
 
+// ── Key Management ──
+
+export async function createSigningKey() {
+  const result = await runPy(`
+import os, json
+os.chdir('${getWorkspace()}')
+
+from coulomb.create_key import signing
+import io, sys
+_old_stdout = sys.stdout
+sys.stdout = io.StringIO()
+signing(private='${getPrivate()}', print_='id')
+key_id = sys.stdout.getvalue().strip()
+sys.stdout = _old_stdout
+_bridge_out = json.dumps({'key_id': key_id})
+`);
+  return JSON.parse(result);
+}
+
+export async function createEncryptionKey() {
+  const result = await runPy(`
+import os, json
+os.chdir('${getWorkspace()}')
+
+from coulomb.create_key import encryption
+import io, sys
+_old_stdout = sys.stdout
+sys.stdout = io.StringIO()
+encryption(private='${getPrivate()}')
+key_id = sys.stdout.getvalue().strip()
+sys.stdout = _old_stdout
+_bridge_out = json.dumps({'key_id': key_id})
+`);
+  return JSON.parse(result);
+}
+
+export async function addKeyToIdentity(keyFilePaths) {
+  const pathsJson = JSON.stringify(keyFilePaths);
+  await runPy(`
+import os, glob, json
+os.chdir('${getWorkspace()}')
+
+identity_files = glob.glob('${getPublic()}/identity/*/latest.cbor')
+if not identity_files:
+    raise RuntimeError("No identity found. Run init first.")
+
+import cbor2
+with open(identity_files[0], 'rb') as f:
+    entry = cbor2.load(f)
+key_id = entry['content']['author']['id']
+
+private_key_files = glob.glob('${getPrivate()}/private_identity.*.cbor') + glob.glob('${getPrivate()}/signing.*.cbor')
+
+from coulomb.identity import add_key
+with open('${getChangelog()}', 'a') as _cl:
+    add_key(
+        identity='${getPublic()}/identity/' + key_id,
+        change_log=_cl,
+        signatures=private_key_files,
+        key_files=json.loads(${JSON.stringify(pathsJson)})
+    )
+`);
+}
+
+export async function removeKeyFromIdentity(keyIds) {
+  const idsJson = JSON.stringify(keyIds);
+  await runPy(`
+import os, glob, json
+os.chdir('${getWorkspace()}')
+
+identity_files = glob.glob('${getPublic()}/identity/*/latest.cbor')
+if not identity_files:
+    raise RuntimeError("No identity found. Run init first.")
+
+import cbor2
+with open(identity_files[0], 'rb') as f:
+    entry = cbor2.load(f)
+key_id = entry['content']['author']['id']
+
+private_key_files = glob.glob('${getPrivate()}/private_identity.*.cbor') + glob.glob('${getPrivate()}/signing.*.cbor')
+
+from coulomb.identity import rm_key
+with open('${getChangelog()}', 'a') as _cl:
+    rm_key(
+        identity='${getPublic()}/identity/' + key_id,
+        change_log=_cl,
+        signatures=private_key_files,
+        key_ids=json.loads(${JSON.stringify(idsJson)})
+    )
+`);
+}
+
+export async function listKeys() {
+  const result = await runPy(`
+import os, glob, json
+os.chdir('${getWorkspace()}')
+
+import cbor2
+
+# Get identity keys
+identity_files = glob.glob('${getPublic()}/identity/*/latest.cbor')
+signing_keys = []
+encryption_keys = []
+if identity_files:
+    with open(identity_files[0], 'rb') as f:
+        entry = cbor2.load(f)
+    author = entry['content']['author']
+    signing_keys = author.get('signing_keys', [])
+    encryption_keys = author.get('encryption_keys', [])
+
+# Get private key files
+private_signing = glob.glob('${getPrivate()}/signing.*.cbor')
+private_encryption = glob.glob('${getPrivate()}/encryption.*.cbor')
+private_identity = glob.glob('${getPrivate()}/private_identity.*.cbor')
+
+_bridge_out = json.dumps({
+    'signing_keys': signing_keys,
+    'encryption_keys': encryption_keys,
+    'private_signing': [os.path.basename(f) for f in private_signing],
+    'private_encryption': [os.path.basename(f) for f in private_encryption],
+    'private_identity': [os.path.basename(f) for f in private_identity],
+})
+`);
+  return JSON.parse(result);
+}
+
 export async function addLocation(url, index = null) {
   const indexPy = index !== null ? index : 'None';
   await runPy(`
@@ -428,41 +554,22 @@ _bridge_out = json.dumps({'valid': valid, 'detail': detail, 'signatures': result
 
 export async function getSiteConfig() {
   const result = await runPy(`
-import os, json
+import os, json, glob
 os.chdir('${getWorkspace()}')
 
-config_path = '${getPublic()}/config.cbor'
+import cbor2
 _bridge_out = '{}'
-if os.path.exists(config_path):
-    import cbor2
-    with open(config_path, 'rb') as f:
-        config = cbor2.load(f)
-    _bridge_out = json.dumps(config.get('config', {}).get('text_values', {}))
+identity_files = glob.glob('${getPublic()}/identity/*/latest.cbor')
+if identity_files:
+    with open(identity_files[0], 'rb') as f:
+        entry = cbor2.load(f)
+    _bridge_out = json.dumps(entry['content']['author'].get('config', {}))
 `);
   return JSON.parse(result);
 }
 
 export async function setSiteConfig(key, value) {
-  await runPy(`
-import os
-os.chdir('${getWorkspace()}')
-
-import cbor2
-
-config_path = '${getPublic()}/config.cbor'
-config = {}
-if os.path.exists(config_path):
-    with open(config_path, 'rb') as f:
-        config = cbor2.load(f)
-
-config.setdefault('config', {}).setdefault('text_values', {})[${JSON.stringify(key)}] = ${JSON.stringify(value)}
-
-with open(config_path, 'wb') as f:
-    cbor2.dump(config, f, canonical=True)
-
-with open('${getChangelog()}', 'a') as _cl:
-    _cl.write('config.cbor\\n')
-`);
+  return setIdentityConfig([[key, value]]);
 }
 
 export async function getPendingFiles() {

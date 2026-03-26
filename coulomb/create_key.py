@@ -63,7 +63,7 @@ def signing(private, print_):
         print(key_id)
 
 
-def encryption(private):
+def encryption(private, print_='id'):
     key = nacl.public.PrivateKey.generate()
     key_id = bytes(key.public_key).hex()
 
