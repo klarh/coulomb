@@ -555,6 +555,12 @@ label {
   color: var(--accent);
 }
 
+.emoji-fingerprint {
+  font-size: 1.5rem;
+  letter-spacing: 0.25em;
+  user-select: none;
+}
+
 .hint-banner {
   font-size: 0.85rem;
   padding: 0.5rem 0.75rem;
@@ -727,6 +733,31 @@ label {
   background: var(--surface-2);
   color: var(--accent);
 }
+
+.feed-verify-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  cursor: pointer;
+  padding: 0.2rem 0.5rem;
+  border-radius: var(--radius);
+}
+
+.feed-verify-btn:hover {
+  background: var(--surface-2);
+  color: var(--accent);
+}
+
+.feed-verify-btn.verified { color: #4caf50; cursor: default; }
+.feed-verify-btn.failed { color: var(--accent); cursor: default; }
+
+.feed-verify-status {
+  font-size: 0.75rem;
+  margin-left: 0.25rem;
+}
+.feed-verify-status.valid { color: #4caf50; }
+.feed-verify-status.invalid { color: var(--accent); }
 
 /* Sidebar (CSS-only toggle) */
 .sr-only {
