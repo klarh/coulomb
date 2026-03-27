@@ -14,6 +14,7 @@ import jinja2
 
 from .cmd import register_subcommand
 from .index_walker import IndexWalker, load_index, parse_entry
+from .markdown_render import render_markdown
 
 
 def _cubehelix_rgb(lam, s=0, r=1, h=1.2, gamma=1):
@@ -214,7 +215,7 @@ TEMPLATES = dict(
                 </div>
                 <a class="post-time" href="{{ post.direct_link }}">{{ post.time[:16] }}</a>
             </div>
-            <div class="post-body">{{ post.text|e }}</div>
+            <div class="post-body md-content">{{ post.text|markdown }}</div>
             {% for reply in post.get('replies', []) %}
             <div class="reply-card">
                 <div class="post-header">
@@ -235,7 +236,7 @@ TEMPLATES = dict(
                     <span class="post-time">{{ reply.time[:16] }}</span>
                     {% endif %}
                 </div>
-                <div class="post-body">{{ reply.text|e }}</div>
+                <div class="post-body md-content">{{ reply.text|markdown }}</div>
             </div>
             {% endfor %}
         </article>
@@ -829,6 +830,7 @@ def main(
 ):
     env = jinja2.Environment()
     env.filters['identicon'] = identicon_data_uri
+    env.filters['markdown'] = lambda text: jinja2.Markup(render_markdown(text))
     templates = {}
     if template_dir:
         with open(os.path.join(template_dir, 'post.jinja'), 'r') as f:

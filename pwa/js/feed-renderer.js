@@ -104,7 +104,7 @@ function renderPostNode(post, depth, onReply, onVerify, onOpenFile) {
       </div>
     </div>
     ${replyToHtml}
-    <div class="feed-text">${escapeHtml(post.text)}</div>
+    <div class="feed-text md-content">${post.text_html || escapeHtml(post.text)}</div>
     <div class="feed-attachments"></div>
     <div class="feed-actions">
       <button class="feed-reply-btn" title="Reply">↩ Reply</button>

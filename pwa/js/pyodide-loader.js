@@ -34,7 +34,11 @@ export async function loadPyodideRuntime(onProgress) {
   const micropip = pyodideInstance.pyimport('micropip');
 
   // PyNaCl (with cffi + libsodium bindings) installs and works in Pyodide
-  await Promise.all([micropip.install('cbor2'), micropip.install('pynacl')]);
+  await Promise.all([
+    micropip.install('cbor2'),
+    micropip.install('pynacl'),
+    micropip.install('markdown'),
+  ]);
 
   onProgress?.('Loading Coulomb…', 75);
 
@@ -87,6 +91,7 @@ async function loadCoulombSource(pyodide) {
     'verify.py',
     'TimeArchive.py',
     'util.py',
+    'markdown_render.py',
   ];
 
   pyodide.FS.mkdirTree('/coulomb/coulomb');
