@@ -5,7 +5,7 @@ import {
   setDisplayName, setAvatarUrl, setIdentityConfig,
   addLocation, removeLocation,
   createPost, listRecentPosts, getPendingFiles, getAllPublicFiles,
-  readWorkspaceFile, renderSite,
+  readWorkspaceFile, renderSite, verifyPost,
   getSiteConfig, setSiteConfig, generateQRCodeSVG,
   getActiveAccount, getWorkspacePath, listAccounts, createAccount, switchAccount, deleteAccount,
   getAccountProfiles, updateAccountProfile,
@@ -161,6 +161,11 @@ function bindEvents() {
   document.getElementById('btn-github-connect').addEventListener('click', handleGitHubConnect);
   document.getElementById('btn-github-disconnect').addEventListener('click', handleGitHubDisconnect);
   document.getElementById('btn-publish').addEventListener('click', handlePublish);
+  const pwaCheckbox = document.getElementById('publish-include-pwa');
+  pwaCheckbox.checked = localStorage.getItem('coulomb_bundle_pwa') === '1';
+  pwaCheckbox.addEventListener('change', () => {
+    localStorage.setItem('coulomb_bundle_pwa', pwaCheckbox.checked ? '1' : '0');
+  });
 
   // Accounts
   document.getElementById('btn-sidebar-create-account').addEventListener('click', handleCreateAccount);
@@ -255,6 +260,32 @@ async function refreshFeed() {
     const container = document.getElementById('feed-container');
     renderFeed(container, posts, {
       onReply: (post) => setReplyTarget(post),
+      onVerify: async (post, btn, statusEl) => {
+        btn.disabled = true;
+        btn.textContent = '⏳ Verifying…';
+        try {
+          const result = await verifyPost(post.path);
+          if (result.valid) {
+            btn.textContent = '✅ Valid';
+            btn.classList.add('verified');
+            statusEl.textContent = result.detail;
+            statusEl.className = 'feed-verify-status valid';
+          } else {
+            btn.textContent = '❌ Invalid';
+            btn.classList.add('failed');
+            statusEl.textContent = result.detail;
+            statusEl.className = 'feed-verify-status invalid';
+          }
+        } catch (e) {
+          btn.textContent = '❌ Error';
+          statusEl.textContent = e.message;
+          statusEl.className = 'feed-verify-status invalid';
+        }
+      },
+      onOpenFile: (post, filename) => {
+        if (!post.files_dir) return null;
+        return readWorkspaceFile(`${post.files_dir}/${filename}`);
+      },
     });
   } catch (e) {
     console.error('Failed to load feed:', e);

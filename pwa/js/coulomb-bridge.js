@@ -412,13 +412,15 @@ with open('${getChangelog()}', 'a') as _cl:
 // ── Posts ──
 
 export async function createPost(text, files = [], replyTo = null) {
-  // Write attached files to Pyodide FS so post.main can read them
+  // Write attached files to a unique temp dir in Pyodide FS
   const pyodide = getPyodide();
+  const tmpDir = `/tmp/post_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  pyodide.FS.mkdirTree(tmpDir);
   const filePaths = [];
   for (const file of files) {
     const buffer = await file.arrayBuffer();
     const data = new Uint8Array(buffer);
-    const tmpPath = `/tmp/attach_${file.name}`;
+    const tmpPath = `${tmpDir}/${file.name}`;
     pyodide.FS.writeFile(tmpPath, data);
     filePaths.push(tmpPath);
   }
@@ -448,6 +450,15 @@ _post_result = coulomb_post(
 )
 _bridge_out = json.dumps({'post_path': str(_post_result) if _post_result else None})
 `);
+
+  // Clean up temp dir
+  try {
+    for (const p of filePaths) {
+      try { pyodide.FS.unlink(p); } catch (_) {}
+    }
+    try { pyodide.FS.rmdir(tmpDir); } catch (_) {}
+  } catch (_) {}
+
   return JSON.parse(result);
 }
 
@@ -484,6 +495,11 @@ for pf in post_files:
         config = _latest_configs.get(author_id, author.get('config', {}))
         file_list = content.get('files', [])
         reply_to = content.get('reply_to', None)
+        post_id = content.get('id', '')
+        # Files directory: posts/{author_id}/{post_id}/files/
+        post_dir = os.path.dirname(pf)
+        files_dir = os.path.join(post_dir, post_id, 'files')
+        files_rel = os.path.relpath(files_dir, '${getPublic()}') if os.path.isdir(files_dir) else None
         posts.append({
             'path': pf,
             'rel_path': pf.replace('${getPublic()}/', ''),
@@ -492,6 +508,7 @@ for pf in post_files:
             'author_id': author_id,
             'display_name': config.get('display_name', ''),
             'files': [f.get('name', '') for f in file_list],
+            'files_dir': files_rel,
             'file_count': len(file_list),
             'reply_to': reply_to,
             'sig_count': len(entry.get('signatures', {})),
