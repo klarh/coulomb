@@ -776,6 +776,50 @@ label {
   margin-bottom: 0.25rem;
 }
 
+.feed-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin: 0.25rem 0;
+}
+
+.feed-tag {
+  display: inline-block;
+  font-size: 0.75rem;
+  color: var(--accent);
+  background: rgba(233, 69, 96, 0.1);
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  cursor: default;
+}
+
+.feed-tag-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.75rem;
+  margin-bottom: 0.75rem;
+  background: var(--surface-2);
+  border-radius: var(--radius);
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.feed-tag-clear {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  padding: 0.1rem 0.5rem;
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.feed-tag-clear:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
 .feed-actions {
   margin-top: 0.25rem;
 }

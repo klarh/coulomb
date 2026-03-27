@@ -167,6 +167,15 @@ body {
 .md-content h3 { font-size: 1.05em; }
 .md-content hr { border: none; border-top: 1px solid var(--border); margin: 0.75em 0; }
 
+/* Tags */
+.post-tags { display: flex; flex-wrap: wrap; gap: 0.3rem; margin: 0.25rem 0 0.5rem; }
+.post-tag {
+    display: inline-block; font-size: 0.8em;
+    color: var(--accent, #e94560); background: rgba(233, 69, 96, 0.1);
+    padding: 0.1rem 0.5rem; border-radius: 999px; text-decoration: none;
+}
+.post-tag:hover { background: rgba(233, 69, 96, 0.2); }
+
 /* Reply threading */
 .reply-card {
     margin-left: 52px;

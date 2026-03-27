@@ -521,6 +521,7 @@ for pf in post_files:
             'rel_path': pf.replace('${getPublic()}/', ''),
             'text': _text,
             'text_html': _render_md(_text),
+            'tags': content.get('tags', []),
             'time': content.get('time', ''),
             'author_id': author_id,
             'display_name': config.get('display_name', ''),
